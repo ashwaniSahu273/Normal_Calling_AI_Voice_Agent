@@ -62,21 +62,88 @@ _CLOSING_THANKS = (
 )
 
 
+def _shorten(text: str, limit: int = 120) -> str:
+    t = " ".join((text or "").split())
+    if len(t) <= limit:
+        return t
+    return t[: limit - 1].rstrip() + "…"
+
+
+def merge_transcript_line(
+    transcript: list[dict[str, str]], role: str, text: str
+) -> None:
+    """Append or extend last line (Gemini STT often sends growing partials)."""
+    text = " ".join((text or "").split()).strip()
+    if not text:
+        return
+    if transcript and transcript[-1].get("role") == role:
+        prev = (transcript[-1].get("text") or "").strip()
+        if prev == text:
+            return
+        if text.startswith(prev) or (prev and prev in text and len(text) > len(prev)):
+            transcript[-1]["text"] = text
+            return
+        if prev.startswith(text):
+            return
+    transcript.append({"role": role, "text": text})
+
+
+def _substantive_user_lines(transcript: list[dict[str, str]]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in transcript:
+        if entry.get("role") != "user":
+            continue
+        t = " ".join((entry.get("text") or "").split()).strip()
+        if len(t) < 5 or user_wants_to_end(t):
+            continue
+        key = t.lower()[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
 def build_call_digest(
     transcript: list[dict[str, str]],
     *,
     caller_intent: str = "",
-    max_lines: int = 14,
+    max_lines: int = 16,
     max_chars: int = 1200,
 ) -> str:
-    """Short bullet digest — keeps long calls accurate after session refresh."""
+    """Short digest for session refresh — facts caller already knows (no re-ask)."""
     if not transcript:
         return "New call; no prior topics yet."
 
-    lines: list[str] = []
+    lines: list[str] = [
+        "PHONE CALL IN PROGRESS — same caller, same receptionist.",
+        "Do NOT greet again. Do NOT re-ask language preference if already chosen.",
+        "Do NOT repeat questions the caller already answered.",
+    ]
     if caller_intent:
-        lines.append(f"Caller intent so far: {caller_intent}.")
+        lines.append(f"Main topic: {caller_intent}.")
 
+    user_asks = _substantive_user_lines(transcript)
+    if user_asks:
+        lines.append("Caller already asked about:")
+        for q in user_asks[-5:]:
+            lines.append(f"  • {_shorten(q, 140)}")
+
+    agent_facts: list[str] = []
+    for entry in transcript:
+        if entry.get("role") != "assistant":
+            continue
+        t = " ".join((entry.get("text") or "").split()).strip()
+        if len(t) < 25 or user_wants_to_end(t):
+            continue
+        agent_facts.append(_shorten(t, 160))
+    if agent_facts:
+        lines.append("You already told them:")
+        for a in agent_facts[-4:]:
+            lines.append(f"  • {a}")
+
+    lines.append("Recent lines:")
     tail = transcript[-max_lines:]
     for entry in tail:
         role = entry.get("role", "")
@@ -84,11 +151,12 @@ def build_call_digest(
         if not text:
             continue
         label = "Caller" if role == "user" else "Agent"
-        lines.append(f"- {label}: {text[:220]}")
+        lines.append(f"- {label}: {_shorten(text, 200)}")
 
     digest = "\n".join(lines)
-    if len(digest) > max_chars:
-        digest = digest[: max_chars - 1].rsplit("\n", 1)[0] + "…"
+    limit = max(max_chars, 800)
+    if len(digest) > limit:
+        digest = digest[: limit - 1].rsplit("\n", 1)[0] + "…"
     return digest or "Ongoing call; continue helping the caller."
 
 
@@ -176,55 +244,15 @@ def build_owner_summary(
     appointment_booked: bool = False,
     lead_captured: bool = False,
 ) -> str:
-    """
-    Short owner-facing summary (no transcript dump).
-    Used when the model skips end_call summary or for sheet/WhatsApp.
-    """
-    user_lines = [
-        (t.get("text") or "").strip()
-        for t in transcript
-        if t.get("role") == "user" and (t.get("text") or "").strip()
-    ]
-    agent_lines = [
-        (t.get("text") or "").strip()
-        for t in transcript
-        if t.get("role") == "assistant" and (t.get("text") or "").strip()
-    ]
-
-    topic = (caller_intent or "General enquiry").strip()
-    substantive_user = [
-        u for u in user_lines if not user_wants_to_end(u) and len(u) > 3
-    ]
-    main_ask = substantive_user[0][:160] if substantive_user else (user_lines[0][:120] if user_lines else "")
-    if len(substantive_user) > 1:
-        also = substantive_user[1][:100]
-        ask_part = f"They asked about {topic}. Main question: {main_ask}. Also: {also}."
-    elif main_ask:
-        ask_part = f"They asked about {topic}. Caller said: {main_ask}."
-    else:
-        ask_part = f"Topic: {topic}. Very short call with little detail captured."
-
-    last_agent = ""
-    for line in reversed(agent_lines):
-        if len(line) > 15:
-            last_agent = line[:180]
-            break
-    answer_part = f" Agent explained: {last_agent}." if last_agent else ""
-
-    if appointment_booked:
-        next_step = "Appointment booked — confirm with caller if needed."
-    elif lead_captured:
-        next_step = "Lead captured — team should call back."
-    elif follow_up == "callback":
-        next_step = "Callback requested — follow up soon."
-    elif follow_up == "team_notified":
-        next_step = "Team notified — check internal notes."
-    elif follow_up == "appointment":
-        next_step = "Appointment noted — confirm slot."
-    else:
-        next_step = "No follow-up action unless caller expects a callback."
-
-    return (ask_part + answer_part + " " + next_step).strip()
+    """Short owner-facing summary (no transcript dump)."""
+    return compose_sheet_summary(
+        transcript,
+        caller_intent=caller_intent,
+        follow_up=follow_up,
+        appointment_booked=appointment_booked,
+        lead_captured=lead_captured,
+        outcome="",
+    )
 
 
 def sheet_next_step_label(
@@ -266,13 +294,6 @@ def is_poor_summary(text: str) -> bool:
     return False
 
 
-def _shorten(text: str, limit: int = 120) -> str:
-    t = " ".join((text or "").split())
-    if len(t) <= limit:
-        return t
-    return t[: limit - 1].rstrip() + "…"
-
-
 def compose_sheet_summary(
     transcript: list[dict[str, str]],
     *,
@@ -282,37 +303,46 @@ def compose_sheet_summary(
     lead_captured: bool = False,
     outcome: str = "",
 ) -> str:
-    """2–3 plain sentences for voice_calls.summary (no chat paste)."""
+    """Plain-language owner summary for sheet / WhatsApp."""
     topic = (caller_intent or "General enquiry").strip()
-    user_lines = [
-        (t.get("text") or "").strip()
-        for t in transcript
-        if t.get("role") == "user" and (t.get("text") or "").strip()
-    ]
+    asks = [_shorten(q, 110) for q in _substantive_user_lines(transcript)]
+    if not asks and transcript:
+        for entry in transcript:
+            if entry.get("role") == "user":
+                t = (entry.get("text") or "").strip()
+                if t and not user_wants_to_end(t):
+                    asks.append(_shorten(t, 110))
+                    break
+
     agent_lines = [
-        (t.get("text") or "").strip()
-        for t in transcript
-        if t.get("role") == "assistant" and (t.get("text") or "").strip()
+        " ".join((entry.get("text") or "").split()).strip()
+        for entry in transcript
+        if entry.get("role") == "assistant"
     ]
-    asks = [u for u in user_lines if not user_wants_to_end(u) and len(u) > 4]
-    main_ask = _shorten(asks[0], 100) if asks else ""
-    extra_ask = _shorten(asks[1], 80) if len(asks) > 1 else ""
-
-    answer = ""
+    answers: list[str] = []
     for line in reversed(agent_lines):
-        if user_wants_to_end(line):
+        if user_wants_to_end(line) or len(line) < 20:
             continue
-        if len(line) > 20:
-            answer = _shorten(line, 130)
+        answers.append(_shorten(line, 120))
+        if len(answers) >= 2:
             break
+    answers.reverse()
 
-    parts: list[str] = [f"Caller enquired about {topic}."]
-    if main_ask:
-        parts.append(f"Key ask: {main_ask}" + (f"; also {extra_ask}." if extra_ask else "."))
-    if answer:
-        parts.append(f"Agent shared: {answer}")
-    if outcome and "hangup" not in outcome.lower():
-        parts.append(f"Call ended: {outcome}.")
+    parts: list[str] = []
+    if asks:
+        q_text = asks[0]
+        if len(asks) > 1:
+            q_text += f"; also asked: {asks[1]}"
+        if len(asks) > 2:
+            q_text += f" (+{len(asks) - 2} more)"
+        parts.append(f"Topic: {topic}. Caller wanted: {q_text}.")
+    else:
+        parts.append(f"Topic: {topic}. Short call with limited detail.")
+
+    if answers:
+        parts.append(f"Agent covered: {answers[-1]}.")
+        if len(answers) > 1:
+            parts[-1] = f"Agent covered: {answers[0]}; later: {answers[-1]}."
 
     next_l = sheet_next_step_label(
         follow_up,
@@ -320,7 +350,9 @@ def compose_sheet_summary(
         lead_captured=lead_captured,
     )
     if next_l and next_l != "None":
-        parts.append(f"Follow-up: {next_l}.")
+        parts.append(f"Next step: {next_l}.")
+    elif outcome and "hangup" not in outcome.lower():
+        parts.append(f"Call ended: {outcome}.")
 
     return " ".join(parts)[:480].strip()
 
@@ -330,9 +362,11 @@ def pick_summary_for_sheet(
     transcript: list[dict[str, str]],
     **kwargs: Any,
 ) -> str:
-    model = (model_summary or "").strip()
     composed = compose_sheet_summary(transcript, **kwargs)
-    if model and not is_poor_summary(model):
+    model = (model_summary or "").strip()
+    if model and not is_poor_summary(model) and len(model) >= 50:
+        if composed and len(composed) > len(model) + 80:
+            return composed[:480]
         return model[:480]
     return composed
 

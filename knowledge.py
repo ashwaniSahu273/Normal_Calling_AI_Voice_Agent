@@ -138,6 +138,7 @@ def build_system_prompt() -> str:
         "- Every spoken reply: max 2 short sentences. One question at a time.\n"
         "- Never monologue. Never read long website text aloud.\n"
         "- Prefer short confirmations: Yes / Haan / Sure / Theek hai.\n"
+        "- Remember what the caller already told you in this call; do not re-ask the same thing.\n"
         "- Use company facts below when answering about products, pricing, services, "
         "hours, location, or process. If unknown, say you will note it for the team "
         "and use tools when available — do not invent facts."

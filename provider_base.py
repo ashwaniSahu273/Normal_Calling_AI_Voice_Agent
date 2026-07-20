@@ -72,6 +72,10 @@ class RealtimeProvider(abc.ABC):
         """Optional: soft-reset AI session mid-call (latency / context trim)."""
         return
 
+    def set_continuity_digest(self, digest: str) -> None:
+        """Latest call context for Gemini reconnect / soft reset (bridge updates)."""
+        return
+
     def needs_soft_reset(self) -> bool:
         return False
 

@@ -20,6 +20,7 @@ from call_digest import (
     detect_language_hint,
     format_conversation_full,
     format_conversation_preview,
+    merge_transcript_line,
     pick_summary_for_sheet,
     sheet_next_step_label,
     user_wants_to_end,
@@ -71,6 +72,35 @@ class CallBridge:
         self._soft_reset_busy = False
         self._farewell_pending = False
         self._farewell_force_task: asyncio.Task | None = None
+        self._soft_reset_epoch = time.monotonic()
+        self._caller_turns_since_reset = 0
+        self._user_spoke_this_cycle = False
+
+    def _sync_continuity_digest(self) -> None:
+        if self.provider is None:
+            return
+        digest = build_call_digest(
+            self._transcript,
+            caller_intent=self._guess_intent(),
+            max_chars=config.GEMINI_DIGEST_MAX_CHARS,
+        )
+        self.provider.set_continuity_digest(digest)
+
+    def _bridge_needs_soft_reset(self) -> bool:
+        if config.GEMINI_SOFT_RESET_EVERY_TURNS <= 0 and config.GEMINI_SOFT_RESET_EVERY_SEC <= 0:
+            return False
+        elapsed = time.monotonic() - self._soft_reset_epoch
+        if (
+            config.GEMINI_SOFT_RESET_EVERY_SEC > 0
+            and elapsed >= config.GEMINI_SOFT_RESET_EVERY_SEC
+        ):
+            return True
+        if (
+            config.GEMINI_SOFT_RESET_EVERY_TURNS > 0
+            and self._caller_turns_since_reset >= config.GEMINI_SOFT_RESET_EVERY_TURNS
+        ):
+            return True
+        return False
 
     async def run(self) -> None:
         await self.tel_ws.accept()
@@ -335,14 +365,19 @@ class CallBridge:
                     self._touch()
                     if self.telephony == "exotel":
                         await self._flush_exotel()
+                    if self._user_spoke_this_cycle:
+                        self._caller_turns_since_reset += 1
+                        self._user_spoke_this_cycle = False
                     if self._farewell_pending:
                         await self._maybe_finish_after_farewell()
                     else:
                         await self._maybe_soft_reset_session()
                 elif isinstance(ev, TranscriptDelta):
                     if ev.text:
-                        self._transcript.append({"role": ev.role, "text": ev.text})
+                        merge_transcript_line(self._transcript, ev.role, ev.text)
+                        self._sync_continuity_digest()
                         if ev.role == "user":
+                            self._user_spoke_this_cycle = True
                             self._touch()
                             if user_wants_to_end(ev.text):
                                 asyncio.create_task(
@@ -447,7 +482,7 @@ class CallBridge:
     async def _maybe_soft_reset_session(self) -> None:
         if self._closing or self._soft_reset_busy or self.provider is None or self._farewell_pending:
             return
-        if not self.provider.needs_soft_reset():
+        if not self._bridge_needs_soft_reset():
             return
         self._soft_reset_busy = True
         try:
@@ -457,6 +492,8 @@ class CallBridge:
                 max_chars=config.GEMINI_DIGEST_MAX_CHARS,
             )
             await self.provider.refresh_session(digest)
+            self._soft_reset_epoch = time.monotonic()
+            self._caller_turns_since_reset = 0
             log.info("Soft session reset completed call_id=%s", self.call_id)
         except Exception:  # noqa: BLE001
             log.exception("Soft session reset failed")

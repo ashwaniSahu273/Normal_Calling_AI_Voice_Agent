@@ -83,7 +83,7 @@ END_CALL_GRACE_SEC = float(os.getenv("END_CALL_GRACE_SEC", "2.5"))
 # RMS threshold on PCM16 to count inbound as speech (ignore line noise)
 SPEECH_RMS_THRESHOLD = int(os.getenv("SPEECH_RMS_THRESHOLD", "400"))
 # If caller spoke but AI stays quiet, nudge Gemini (seconds)
-AI_RESPONSE_NUDGE_SEC = float(os.getenv("AI_RESPONSE_NUDGE_SEC", "3.5"))
+AI_RESPONSE_NUDGE_SEC = float(os.getenv("AI_RESPONSE_NUDGE_SEC", "2.8"))
 
 # Gemini VAD / latency — ~400ms is a good balance (too low cuts speech; too high feels slow)
 GEMINI_SILENCE_MS = int(os.getenv("GEMINI_SILENCE_MS", "400"))
@@ -91,9 +91,10 @@ GEMINI_PREFIX_PADDING_MS = int(os.getenv("GEMINI_PREFIX_PADDING_MS", "20"))
 GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
 
 # Soft session reset — keeps long calls responsive (new Live session + digest)
-GEMINI_SOFT_RESET_EVERY_TURNS = int(os.getenv("GEMINI_SOFT_RESET_EVERY_TURNS", "12"))
-GEMINI_SOFT_RESET_EVERY_SEC = float(os.getenv("GEMINI_SOFT_RESET_EVERY_SEC", "240"))
-GEMINI_DIGEST_MAX_CHARS = int(os.getenv("GEMINI_DIGEST_MAX_CHARS", "1200"))
+# Turn-based reset uses real caller Q&A turns in bridge (not STT fragments). 0 = time-only.
+GEMINI_SOFT_RESET_EVERY_TURNS = int(os.getenv("GEMINI_SOFT_RESET_EVERY_TURNS", "22"))
+GEMINI_SOFT_RESET_EVERY_SEC = float(os.getenv("GEMINI_SOFT_RESET_EVERY_SEC", "480"))
+GEMINI_DIGEST_MAX_CHARS = int(os.getenv("GEMINI_DIGEST_MAX_CHARS", "1800"))
 
 # lookup_knowledge: search local file first, then n8n action lookup_knowledge
 KNOWLEDGE_SEARCH_LOCAL_FIRST = os.getenv("KNOWLEDGE_SEARCH_LOCAL_FIRST", "true").lower() in (
