@@ -147,13 +147,12 @@ def build_system_prompt() -> str:
 
     hangup_block = (
         "CALL END (strict):\n"
-        "- Keep the conversation going across many questions. Do NOT end after answering 1–3 FAQs.\n"
-        "- ONLY call end_call when the caller clearly wants to hang up: "
-        "goodbye / bye / thanks that's all / bas itna hi / dhanyavaad alvida / call khatam.\n"
-        "- After answering a question, ask if they need anything else — stay on the line.\n"
-        "- NEVER call end_call just because there is a short pause.\n"
-        "- When ending: one short farewell in their language, then end_call with a clear summary "
-        "(who called, what they wanted, next step)."
+        "- Keep helping while the caller still has questions.\n"
+        "- When they say thanks / goodbye / bas / no more / not interested: "
+        "ONE short farewell, then call end_call immediately. Do NOT ask 'anything else?'.\n"
+        "- NEVER ignore goodbye or thanks — end the call politely within that turn.\n"
+        "- NEVER call end_call just because of a short pause.\n"
+        "- end_call summary: 2–3 sentences for the owner (topic, what you answered, next step)."
     )
 
     chunks = [base, language_block, persona_block, style_block, hangup_block]

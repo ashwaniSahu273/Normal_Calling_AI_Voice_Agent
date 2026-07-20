@@ -14,10 +14,15 @@ import audio
 import config
 from call_digest import (
     build_call_digest,
+    build_owner_summary,
+    compose_sheet_summary,
     count_transcript_turns,
     detect_language_hint,
     format_conversation_full,
     format_conversation_preview,
+    pick_summary_for_sheet,
+    sheet_next_step_label,
+    user_wants_to_end,
 )
 from provider_base import (
     AudioDelta,
@@ -64,6 +69,8 @@ class CallBridge:
         self._follow_up = "none"
         self._direction = "inbound"
         self._soft_reset_busy = False
+        self._farewell_pending = False
+        self._farewell_force_task: asyncio.Task | None = None
 
     async def run(self) -> None:
         await self.tel_ws.accept()
@@ -136,6 +143,8 @@ class CallBridge:
         """If caller spoke but AI stays quiet, gently poke Gemini to reply."""
         while not self._closing:
             await asyncio.sleep(0.4)
+            if self._farewell_pending:
+                continue
             if self._awaiting_ai_since is None or self._ai_speaking:
                 continue
             waited = time.monotonic() - self._awaiting_ai_since
@@ -165,6 +174,72 @@ class CallBridge:
                 pass
 
         self._hangup_task = asyncio.create_task(_do(), name="hangup")
+
+    async def _on_caller_farewell(self, text: str) -> None:
+        if self._closing or self._farewell_pending:
+            return
+        self._farewell_pending = True
+        low = text.lower()
+        if any(w in low for w in ("bye", "alvida", "goodbye", "good bye")):
+            self._end_reason = "goodbye"
+        else:
+            self._end_reason = "thanks"
+        self._awaiting_ai_since = None
+        self._nudge_count = 99
+        log.info("Caller farewell detected — prompting end_call")
+        if self.provider is not None:
+            try:
+                await self.provider.nudge(
+                    "The caller wants to END the call now (thanks / goodbye / no more help). "
+                    "Say ONE short warm farewell in their language. "
+                    "Immediately call end_call with summary and caller_intent. "
+                    "Do NOT ask 'anything else?' or start a new topic."
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("farewell nudge failed")
+        if self._farewell_force_task and not self._farewell_force_task.done():
+            self._farewell_force_task.cancel()
+        self._farewell_force_task = asyncio.create_task(
+            self._farewell_force_hangup(14.0), name="farewell-force"
+        )
+
+    async def _farewell_force_hangup(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if self._closing:
+            return
+        if self._hangup_task and not self._hangup_task.done():
+            return
+        if not self._end_summary:
+            self._end_summary = build_owner_summary(
+                self._transcript,
+                caller_intent=self._guess_intent(),
+                follow_up=self._follow_up,
+                appointment_booked=self._appointment_booked,
+                lead_captured=self._lead_captured,
+            )
+        log.info("Farewell timeout — hanging up without end_call tool")
+        await self._request_hangup()
+
+    async def _maybe_finish_after_farewell(self) -> None:
+        if not self._farewell_pending or self._closing:
+            return
+        if self._hangup_task and not self._hangup_task.done():
+            return
+        await asyncio.sleep(2.0)
+        if self._closing:
+            return
+        if self._hangup_task and not self._hangup_task.done():
+            return
+        if not self._end_summary:
+            self._end_summary = build_owner_summary(
+                self._transcript,
+                caller_intent=self._guess_intent(),
+                follow_up=self._follow_up,
+                appointment_booked=self._appointment_booked,
+                lead_captured=self._lead_captured,
+            )
+        log.info("Farewell turn complete — scheduling hangup")
+        await self._request_hangup()
 
     # ---- telephony -> AI ------------------------------------------------
     async def _telephony_to_provider(self) -> None:
@@ -260,13 +335,20 @@ class CallBridge:
                     self._touch()
                     if self.telephony == "exotel":
                         await self._flush_exotel()
-                    await self._maybe_soft_reset_session()
+                    if self._farewell_pending:
+                        await self._maybe_finish_after_farewell()
+                    else:
+                        await self._maybe_soft_reset_session()
                 elif isinstance(ev, TranscriptDelta):
                     if ev.text:
                         self._transcript.append({"role": ev.role, "text": ev.text})
                         if ev.role == "user":
                             self._touch()
-                            if not self._ai_speaking:
+                            if user_wants_to_end(ev.text):
+                                asyncio.create_task(
+                                    self._on_caller_farewell(ev.text), name="farewell"
+                                )
+                            if not self._ai_speaking and not self._farewell_pending:
                                 self._awaiting_ai_since = time.monotonic()
                         elif ev.role == "assistant":
                             self._awaiting_ai_since = None
@@ -344,6 +426,9 @@ class CallBridge:
             self._end_reason = str(call.arguments.get("reason") or "thanks")
             self._end_summary = str(call.arguments.get("summary") or "")
             self._caller_intent = str(call.arguments.get("caller_intent") or "")
+            self._farewell_pending = True
+            if self._farewell_force_task and not self._farewell_force_task.done():
+                self._farewell_force_task.cancel()
             log.info("end_call reason=%s", self._end_reason)
             await self._request_hangup()
             return
@@ -360,7 +445,7 @@ class CallBridge:
                 self._follow_up = "team_notified"
 
     async def _maybe_soft_reset_session(self) -> None:
-        if self._closing or self._soft_reset_busy or self.provider is None:
+        if self._closing or self._soft_reset_busy or self.provider is None or self._farewell_pending:
             return
         if not self.provider.needs_soft_reset():
             return
@@ -425,21 +510,13 @@ class CallBridge:
         return mapping.get(self._end_reason, self._end_reason or "Ended")
 
     def _fallback_summary(self) -> str:
-        if not self._transcript:
-            return (
-                "Short call with little spoken detail captured. "
-                "Please check if the caller needs a callback."
-            )
-        intent = self._guess_intent()
-        user_lines = [t["text"] for t in self._transcript if t["role"] == "user"][-4:]
-        agent_lines = [t["text"] for t in self._transcript if t["role"] == "assistant"][-3:]
-        parts = [f"Caller interest: {intent}."]
-        if user_lines:
-            parts.append("Caller said: " + " | ".join(user_lines))
-        if agent_lines:
-            parts.append("Agent covered: " + " | ".join(agent_lines))
-        parts.append("Follow-up: review and call back if needed.")
-        return " ".join(parts)
+        return build_owner_summary(
+            self._transcript,
+            caller_intent=self._guess_intent(),
+            follow_up=self._follow_up,
+            appointment_booked=self._appointment_booked,
+            lead_captured=self._lead_captured,
+        )
 
     def _format_duration(self, seconds: int) -> str:
         minutes, sec = divmod(max(0, seconds), 60)
@@ -449,17 +526,24 @@ class CallBridge:
 
     async def _notify_call_ended(self) -> None:
         duration = int(time.monotonic() - self._started_at)
-        summary = (self._end_summary or self._fallback_summary()).strip()
-        conversation_full = self._conversation_text()
-        conversation_preview = format_conversation_preview(
-            self._transcript,
-            max_turns=config.SHEET_CONVERSATION_PREVIEW_TURNS,
-            max_total_chars=config.SHEET_CONVERSATION_PREVIEW_MAX_CHARS,
-        )
-        transcript_turns = count_transcript_turns(self._transcript)
         intent = self._guess_intent()
+        next_step = sheet_next_step_label(
+            self._follow_up,
+            appointment_booked=self._appointment_booked,
+            lead_captured=self._lead_captured,
+        )
         outcome = self._friendly_outcome()
-        # IST wall clock for the sheet
+        summary = pick_summary_for_sheet(
+            self._end_summary,
+            self._transcript,
+            caller_intent=intent,
+            follow_up=self._follow_up,
+            appointment_booked=self._appointment_booked,
+            lead_captured=self._lead_captured,
+            outcome=outcome,
+        )
+        conversation_full = format_conversation_full(self._transcript)
+        transcript_turns = count_transcript_turns(self._transcript)
         try:
             from zoneinfo import ZoneInfo
 
@@ -468,32 +552,22 @@ class CallBridge:
             now_ist = datetime.now(timezone.utc)
         date_str = now_ist.strftime("%Y-%m-%d")
         time_str = now_ist.strftime("%I:%M %p")
-        language = detect_language_hint(self._transcript)
-        yes_no = lambda b: "yes" if b else "no"  # noqa: E731
 
         args = {
             "call_id": self._stable_call_id(),
             "date": date_str,
+            "time": time_str,
             "time_ist": time_str,
+            "caller": self.caller or "",
             "caller_phone": self.caller or "",
             "duration": self._format_duration(duration),
             "duration_sec": duration,
-            "direction": self._direction,
-            "language": language,
-            "outcome": outcome,
-            "caller_intent": intent,
+            "topic": intent,
             "summary": summary,
-            "conversation_preview": conversation_preview,
+            "next_step": next_step,
+            "outcome": outcome,
             "conversation_full": conversation_full,
             "transcript_turns": transcript_turns,
-            "transcript_ref": "voice_transcripts tab",
-            "conversation": conversation_preview,
-            "transcript": conversation_full,
-            "appointment_booked": yes_no(self._appointment_booked),
-            "lead_captured": yes_no(self._lead_captured),
-            "follow_up": self._follow_up,
-            "reason": self._end_reason,
-            "ended_at": datetime.now(timezone.utc).isoformat(),
             "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
         }
         ctx = {"call_id": self._stable_call_id(), "from": self.caller}

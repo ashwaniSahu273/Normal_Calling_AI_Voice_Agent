@@ -77,10 +77,9 @@ TOOL_DEFS: list[dict[str, Any]] = [
         "type": "function",
         "name": "end_call",
         "description": (
-            "End the phone call ONLY after the caller clearly says goodbye / thanks that's all / "
-            "bas itna hi / wants to hang up. Do NOT use after normal Q&A while they may still "
-            "have questions. Always speak a short farewell first. Provide a clear human summary: "
-            "caller need, answers given, next step (callback/demo/none)."
+            "End the call when the caller says thanks, goodbye, or does not want to continue. "
+            "Say one short farewell first, then call this tool in the same turn. "
+            "Do NOT keep asking questions after they want to hang up."
         ),
         "parameters": {
             "type": "object",
