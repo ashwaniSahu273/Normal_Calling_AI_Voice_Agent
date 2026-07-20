@@ -1,0 +1,43 @@
+# Secrets and local config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+tmp/
+temp/
+
+# Tunnel / local runtime (optional)
+.cloudflared/

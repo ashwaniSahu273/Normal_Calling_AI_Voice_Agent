@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+httpx==0.28.1
+python-dotenv==1.0.1
+# Gemini Live provider
+google-genai>=2.11.0
+# audioop was removed from the stdlib in Python 3.13; this restores it for mu-law/PCM conversion
+audioop-lts==0.2.1; python_version >= "3.13"
