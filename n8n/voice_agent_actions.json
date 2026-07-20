@@ -8,13 +8,13 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "11111111-1111-4111-8111-111111111111",
+      "id": "92c368f2-08d9-4b39-b847-0a5020e688f2",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        220,
-        360
+        32,
+        2528
       ],
       "webhookId": "voice-agent"
     },
@@ -24,7 +24,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "strict",
+            "version": 1
           },
           "conditions": [
             {
@@ -41,26 +42,39 @@
         },
         "options": {}
       },
-      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "id": "8e1a4cac-1fbf-4b65-9489-c25a75f2f364",
       "name": "Is Call Ended?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        440,
-        360
+        240,
+        2512
       ]
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst args = body.args || {};\n\nfunction normPhone(p) {\n  const d = String(p || '').replace(/\\D/g, '');\n  if (!d) return '';\n  if (d.length === 10) return '91' + d;\n  return d;\n}\n\nfunction shorten(t, limit = 120) {\n  const s = String(t || '').replace(/\\s+/g, ' ').trim();\n  if (s.length <= limit) return s;\n  return s.slice(0, limit - 1).trim() + '…';\n}\n\nfunction poorSummary(text) {\n  const s = String(text || '').trim();\n  if (!s || s.length > 420) return true;\n  const low = s.toLowerCase();\n  if (low.includes('caller said:') || low.includes('agent explained:')) return true;\n  if ((low.match(/caller:/g) || []).length >= 2) return true;\n  if (s.includes('|') && s.split('|').length >= 4) return true;\n  if (s.startsWith('[') && low.includes('turns]')) return true;\n  return false;\n}\n\nfunction composeSummary(topic, conversationFull, nextStep, outcome) {\n  const lines = String(conversationFull || '')\n    .split('\\n')\n    .map((l) => l.trim())\n    .filter(Boolean);\n  const user = lines.filter((l) => l.startsWith('Caller:')).map((l) => l.slice(7).trim());\n  const agent = lines.filter((l) => l.startsWith('Agent:')).map((l) => l.slice(6).trim());\n  const mainAsk = shorten(user.find((u) => u.length > 4) || '', 100);\n  const answer = shorten([...agent].reverse().find((a) => a.length > 20) || '', 130);\n  const parts = [`Caller enquired about ${topic}.`];\n  if (mainAsk) parts.push(`Key ask: ${mainAsk}.`);\n  if (answer) parts.push(`Agent shared: ${answer}`);\n  if (outcome) parts.push(`Call ended: ${outcome}.`);\n  if (nextStep && nextStep !== 'None') parts.push(`Follow-up: ${nextStep}.`);\n  return parts.join(' ').slice(0, 480);\n}\n\nconst from = normPhone(body.from || args.caller_phone);\nconst callId = String(body.call_id || args.call_id || `CALL-${Date.now()}`);\nlet summary = String(args.summary || '').trim();\nconst topic = String(args.topic || args.caller_intent || 'General enquiry').trim();\nlet nextStep = String(args.next_step || '').trim();\nconst conversationFull = String(args.conversation_full || args.transcript || '').trim();\nconst durationSec = Number(args.duration_sec || 0);\nconst duration = args.duration || (durationSec ? `${durationSec} sec` : '');\nconst date = args.date || new Date().toISOString().slice(0, 10);\nconst timeIst = args.time_ist || args.time || '';\nconst business = body.business_name || 'ResilienceSoft';\nconst notify = normPhone(args.notify_whatsapp || body.notify_whatsapp || '');\nconst outcome = args.outcome || args.reason || 'Ended';\nconst turns =\n  Number(args.transcript_turns || 0) ||\n  (conversationFull ? conversationFull.split('\\n').filter(Boolean).length : 0);\n\nif (!nextStep) {\n  if (args.appointment_booked === 'yes') nextStep = 'Appointment booked';\n  else if (args.lead_captured === 'yes') nextStep = 'Lead — call back';\n  else if (args.follow_up === 'callback') nextStep = 'Callback needed';\n  else if (args.follow_up === 'team_notified') nextStep = 'Team notified';\n  else nextStep = 'None';\n}\n\nif (poorSummary(summary)) {\n  summary = composeSummary(topic, conversationFull, nextStep, outcome);\n}\nif (!summary) {\n  summary = composeSummary(topic, conversationFull, nextStep, outcome);\n}\n\nconst waText = [\n  `📞 *${business} — Call*`,\n  `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,\n  `Caller: ${from || 'unknown'}`,\n  `Topic: ${topic}`,\n  `Next: ${nextStep}`,\n  '',\n  summary,\n].join('\\n').trim();\n\nconst waBody = notify\n  ? {\n      messageObject: {\n        messaging_product: 'whatsapp',\n        to: notify,\n        type: 'text',\n        text: { body: waText },\n      },\n      enableLog: true,\n    }\n  : null;\n\nreturn [\n  {\n    json: {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      duration,\n      topic,\n      summary,\n      next_step: nextStep,\n      turns,\n      transcript: conversationFull,\n      notify_whatsapp: notify,\n      waBody,\n      hasWhatsApp: !!waBody,\n    },\n  },\n];\n"
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst args = body.args || {};\n\nfunction normPhone(p) {\n  const d = String(p || '').replace(/\\D/g, '');\n  if (!d) return '';\n  if (d.length === 10) return '91' + d;\n  return d;\n}\n\nfunction shorten(t, limit = 120) {\n  const s = String(t || '').replace(/\\s+/g, ' ').trim();\n  if (s.length <= limit) return s;\n  return s.slice(0, limit - 1).trim() + '…';\n}\n\nfunction poorSummary(text) {\n  const s = String(text || '').trim();\n  if (!s || s.length > 420) return true;\n  const low = s.toLowerCase();\n  if (low.includes('caller said:') || low.includes('agent explained:')) return true;\n  if ((low.match(/caller:/g) || []).length >= 2) return true;\n  if (s.includes('|') && s.split('|').length >= 4) return true;\n  if (s.startsWith('[') && low.includes('turns]')) return true;\n  return false;\n}\n\nfunction composeSummary(topic, conversationFull, nextStep, outcome) {\n  const lines = String(conversationFull || '')\n    .split('\\n')\n    .map((l) => l.trim())\n    .filter(Boolean);\n  const user = lines.filter((l) => l.startsWith('Caller:')).map((l) => l.slice(7).trim());\n  const agent = lines.filter((l) => l.startsWith('Agent:')).map((l) => l.slice(6).trim());\n  const mainAsk = shorten(user.find((u) => u.length > 4) || '', 100);\n  const answer = shorten([...agent].reverse().find((a) => a.length > 20) || '', 130);\n  const parts = [`Caller enquired about ${topic}.`];\n  if (mainAsk) parts.push(`Key ask: ${mainAsk}.`);\n  if (answer) parts.push(`Agent shared: ${answer}`);\n  if (outcome) parts.push(`Call ended: ${outcome}.`);\n  if (nextStep && nextStep !== 'None') parts.push(`Follow-up: ${nextStep}.`);\n  return parts.join(' ').slice(0, 480);\n}\n\nconst from = normPhone(body.from || args.caller_phone || args.caller);\nconst callId = String(body.call_id || args.call_id || `CALL-${Date.now()}`);\nlet summary = String(args.summary || '').trim();\nconst topic = String(args.topic || args.caller_intent || 'General enquiry').trim();\nlet nextStep = String(args.next_step || '').trim();\nconst conversationFull = String(args.conversation_full || args.transcript || '').trim();\nconst durationSec = Number(args.duration_sec || 0);\nconst duration = args.duration || (durationSec ? `${durationSec} sec` : '');\nconst date = args.date || new Date().toISOString().slice(0, 10);\nconst timeIst = args.time_ist || args.time || '';\nconst business = body.business_name || 'ResilienceSoft';\nconst notify = normPhone(args.notify_whatsapp || body.notify_whatsapp || '');\nconst outcome = args.outcome || args.reason || 'Ended';\nconst turns =\n  Number(args.transcript_turns || args.turns || 0) ||\n  (conversationFull ? conversationFull.split('\\n').filter(Boolean).length : 0);\n\nif (!nextStep) {\n  if (args.appointment_booked === 'yes') nextStep = 'Appointment booked';\n  else if (args.lead_captured === 'yes') nextStep = 'Lead — call back';\n  else if (args.follow_up === 'callback') nextStep = 'Callback needed';\n  else if (args.follow_up === 'team_notified') nextStep = 'Team notified';\n  else nextStep = 'None';\n}\n\nif (poorSummary(summary)) {\n  summary = composeSummary(topic, conversationFull, nextStep, outcome);\n}\nif (!summary) {\n  summary = composeSummary(topic, conversationFull, nextStep, outcome);\n}\n\nconst waText = [\n  `📞 *${business} — Call*`,\n  `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,\n  `Caller: ${from || 'unknown'}`,\n  `Topic: ${topic}`,\n  `Next: ${nextStep}`,\n  '',\n  summary,\n].join('\\n').trim();\n\nconst waBody = notify\n  ? {\n      messageObject: {\n        messaging_product: 'whatsapp',\n        to: notify,\n        type: 'text',\n        text: { body: waText },\n      },\n      enableLog: true,\n    }\n  : null;\n\nreturn [\n  {\n    json: {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      duration,\n      topic,\n      summary,\n      next_step: nextStep,\n      turns,\n      transcript: conversationFull,\n      notify_whatsapp: notify,\n      waBody,\n      hasWhatsApp: !!waBody,\n    },\n  },\n];\n"
       },
-      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "id": "8b7a17c0-d313-47df-af81-e94596507514",
       "name": "Build Call Log",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        680,
-        160
+        448,
+        2272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $('Build Call Log').first().json;\nreturn [{\n  json: {\n    call_id: b.call_id,\n    date: b.date,\n    caller: b.caller,\n    turns: b.turns,\n    transcript: b.transcript || '',\n  },\n}];\n"
+      },
+      "id": "33334444-4444-4444-8444-444444444444",
+      "name": "Voice Transcripts Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        2144
       ]
     },
     {
@@ -68,37 +82,82 @@
         "operation": "appendOrUpdate",
         "documentId": {
           "__rl": true,
-          "value": "PASTE_YOUR_GOOGLE_SHEET_ID",
-          "mode": "id"
+          "value": "17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw",
+          "mode": "list",
+          "cachedResultName": "ResilienceSoft Voice Logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw/edit?usp=drivesdk"
         },
         "sheetName": {
           "__rl": true,
           "value": "voice_transcripts",
-          "mode": "name"
+          "mode": "name",
+          "cachedResultName": "voice_transcripts"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "call_id": "={{ $('Build Call Log').item.json.call_id }}",
-            "date": "={{ $('Build Call Log').item.json.date }}",
-            "caller": "={{ $('Build Call Log').item.json.caller }}",
-            "turns": "={{ $('Build Call Log').item.json.turns }}",
-            "transcript": "={{ $('Build Call Log').item.json.transcript }}"
-          },
+          "mappingMode": "autoMapInputData",
+          "value": {},
           "matchingColumns": [
             "call_id"
           ],
-          "schema": []
+          "schema": [
+            {
+              "id": "call_id",
+              "displayName": "call_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "caller",
+              "displayName": "caller",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "turns",
+              "displayName": "turns",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
         },
         "options": {}
       },
-      "id": "55555555-5555-4555-8555-555555555555",
+      "id": "07cf2bf2-49d5-4c03-a7f1-579a6513c515",
       "name": "Upsert Voice Transcript Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        800,
-        160
+        832,
+        2144
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -109,43 +168,125 @@
     },
     {
       "parameters": {
+        "jsCode": "const b = $('Build Call Log').first().json;\nreturn [{\n  json: {\n    call_id: b.call_id,\n    date: b.date,\n    time: b.time,\n    caller: b.caller,\n    duration: b.duration,\n    topic: b.topic,\n    summary: b.summary,\n    next_step: b.next_step,\n  },\n}];\n"
+      },
+      "id": "ec9b1059-7843-45a7-804c-fc415da68c58",
+      "name": "Voice Calls Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        2464
+      ]
+    },
+    {
+      "parameters": {
         "operation": "appendOrUpdate",
         "documentId": {
           "__rl": true,
-          "value": "PASTE_YOUR_GOOGLE_SHEET_ID",
-          "mode": "id"
+          "value": "17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw",
+          "mode": "list",
+          "cachedResultName": "ResilienceSoft Voice Logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw/edit?usp=drivesdk"
         },
         "sheetName": {
           "__rl": true,
           "value": "voice_calls",
-          "mode": "name"
+          "mode": "name",
+          "cachedResultName": "voice_calls"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "call_id": "={{ $json.call_id }}",
-            "date": "={{ $json.date }}",
-            "time": "={{ $json.time }}",
-            "caller": "={{ $json.caller }}",
-            "duration": "={{ $json.duration }}",
-            "topic": "={{ $json.topic }}",
-            "summary": "={{ $json.summary }}",
-            "next_step": "={{ $json.next_step }}"
-          },
+          "mappingMode": "autoMapInputData",
+          "value": {},
           "matchingColumns": [
             "call_id"
           ],
-          "schema": []
+          "schema": [
+            {
+              "id": "call_id",
+              "displayName": "call_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "caller",
+              "displayName": "caller",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "duration",
+              "displayName": "duration",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "next_step",
+              "displayName": "next_step",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
         },
         "options": {}
       },
-      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "id": "53ff6797-00ce-40e1-bd1c-255592dd1891",
       "name": "Upsert Voice Call Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        920,
-        160
+        832,
+        2464
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -160,7 +301,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "loose"
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -178,13 +320,13 @@
         },
         "options": {}
       },
-      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "id": "cf57a787-3bff-4629-ab52-5f1d8d4f13cd",
       "name": "Has WhatsApp?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1160,
-        160
+        1104,
+        2464
       ]
     },
     {
@@ -196,7 +338,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "={{ $env.RESILIOHUB_API_TOKEN }}"
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJPR2VJSzYyRmJkdDdvS01LWGF1TmhiUHJvNUJPM1dwQSIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzgzNDA5MzE1fQ.RXvB_otVtA_AU5nsjvIJZHLQF0N1HKf6El9XtJsvn-M"
             }
           ]
         },
@@ -220,39 +362,39 @@
           }
         }
       },
-      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "id": "5986d6e4-10b7-4998-a475-8b0724da737b",
       "name": "Send WhatsApp Summary",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1400,
-        80
+        1376,
+        2368
       ]
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { status: 'logged', call_id: $('Build Call Log').first().json.call_id, message: 'Call logged to voice_calls; WhatsApp sent if configured.' } }];"
+        "jsCode": "return [{ json: { status: 'logged', call_id: $('Build Call Log').first().json.call_id, message: 'Call logged; WhatsApp sent if configured.' } }];"
       },
-      "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      "id": "140f0687-0698-4353-a8b3-3536ecb2837e",
       "name": "Call Ended OK",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1400,
-        240
+        1376,
+        2560
       ]
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst action = body.action || 'unknown';\nconst args = body.args || {};\nconst callId = body.call_id || `CALL-${Date.now()}`;\nconst from = String(body.from || '').replace(/\\D/g, '');\nconst now = new Date();\nconst date = now.toISOString().slice(0, 10);\nconst timeIst = now.toLocaleTimeString('en-IN', {\n  hour: '2-digit',\n  minute: '2-digit',\n  hour12: true,\n  timeZone: 'Asia/Kolkata',\n});\n\nfunction detailsFor(actionName) {\n  const bits = [];\n  if (args.name) bits.push(`Name: ${args.name}`);\n  if (args.phone) bits.push(`Phone: ${args.phone}`);\n  if (args.service) bits.push(`Service: ${args.service}`);\n  if (args.date) bits.push(`Date: ${args.date}`);\n  if (args.time) bits.push(`Time: ${args.time}`);\n  if (args.interest) bits.push(`Interest: ${args.interest}`);\n  if (args.notes) bits.push(`Notes: ${args.notes}`);\n  if (args.message) bits.push(String(args.message));\n  if (actionName === 'lookup_knowledge' && args.query) bits.push(`Query: ${args.query}`);\n  return bits.join(' · ').slice(0, 500) || '—';\n}\n\nlet response;\nlet sheetRow = null;\n\nswitch (action) {\n  case 'lookup_knowledge': {\n    const q = String(args.query || '').trim();\n    response = {\n      status: 'ok',\n      action,\n      query: q,\n      results: '',\n      message:\n        'No n8n knowledge index configured. Voice-agent should answer using local business_knowledge.md search.',\n    };\n    break;\n  }\n  case 'book_appointment': {\n    response = {\n      status: 'confirmed',\n      action,\n      message: `Appointment noted${args.date ? ' for ' + args.date : ''}${args.time ? ' at ' + args.time : ''}.`.trim(),\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'book_appointment',\n      details: detailsFor('book_appointment'),\n      status: 'confirmed',\n    };\n    break;\n  }\n  case 'create_lead': {\n    response = {\n      status: 'lead_created',\n      action,\n      message: 'Lead captured. The team will follow up shortly.',\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'create_lead',\n      details: detailsFor('create_lead'),\n      status: 'lead_created',\n    };\n    break;\n  }\n  case 'send_notification': {\n    response = {\n      status: 'notified',\n      action,\n      message: 'Your message has been passed to the team.',\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'send_notification',\n      details: detailsFor('send_notification'),\n      status: 'notified',\n    };\n    break;\n  }\n  default: {\n    response = { status: 'ok', action, message: `Action '${action}' received.` };\n  }\n}\n\nreturn [{ json: { ...response, sheetRow } }];\n"
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\nconst action = body.action || 'unknown';\nconst args = body.args || {};\nconst callId = body.call_id || `CALL-${Date.now()}`;\nconst from = String(body.from || '').replace(/\\D/g, '');\nconst now = new Date();\nconst date = now.toISOString().slice(0, 10);\nconst timeIst = now.toLocaleTimeString('en-IN', {\n  hour: '2-digit',\n  minute: '2-digit',\n  hour12: true,\n  timeZone: 'Asia/Kolkata',\n});\n\nfunction detailsFor() {\n  const bits = [];\n  if (args.name) bits.push(`Name: ${args.name}`);\n  if (args.phone) bits.push(`Phone: ${args.phone}`);\n  if (args.service) bits.push(`Service: ${args.service}`);\n  if (args.date) bits.push(`Date: ${args.date}`);\n  if (args.time) bits.push(`Time: ${args.time}`);\n  if (args.interest) bits.push(`Interest: ${args.interest}`);\n  if (args.notes) bits.push(`Notes: ${args.notes}`);\n  if (args.message) bits.push(String(args.message));\n  if (args.query) bits.push(`Query: ${args.query}`);\n  return bits.join(' · ').slice(0, 500) || '—';\n}\n\nlet response;\nlet sheetRow = null;\n\nswitch (action) {\n  case 'lookup_knowledge': {\n    const q = String(args.query || '').trim();\n    response = {\n      status: 'ok',\n      action,\n      query: q,\n      results: '',\n      message: 'Use local business_knowledge.md search from voice-agent.',\n    };\n    break;\n  }\n  case 'book_appointment': {\n    response = {\n      status: 'confirmed',\n      action,\n      message: `Appointment noted${args.date ? ' for ' + args.date : ''}${args.time ? ' at ' + args.time : ''}.`.trim(),\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'book_appointment',\n      details: detailsFor(),\n      status: 'confirmed',\n    };\n    break;\n  }\n  case 'create_lead': {\n    response = {\n      status: 'lead_created',\n      action,\n      message: 'Lead captured. The team will follow up shortly.',\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'create_lead',\n      details: detailsFor(),\n      status: 'lead_created',\n    };\n    break;\n  }\n  case 'send_notification': {\n    response = {\n      status: 'notified',\n      action,\n      message: 'Your message has been passed to the team.',\n    };\n    sheetRow = {\n      call_id: callId,\n      date,\n      time: timeIst,\n      caller: from,\n      action: 'send_notification',\n      details: detailsFor(),\n      status: 'notified',\n    };\n    break;\n  }\n  default: {\n    response = { status: 'ok', action, message: `Action '${action}' received.` };\n  }\n}\n\nreturn [{ json: { ...response, sheetRow } }];\n"
       },
-      "id": "22222222-2222-4222-8222-222222222222",
+      "id": "a9ea3713-0077-4485-814e-b72e7753b422",
       "name": "Handle Action",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        680,
-        480
+        656,
+        2640
       ]
     },
     {
@@ -261,7 +403,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "loose"
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -279,26 +422,26 @@
         },
         "options": {}
       },
-      "id": "99999999-9999-4999-8999-999999999999",
+      "id": "42c333a6-18d0-452c-8599-c447b74ce331",
       "name": "Log Action To Sheet?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        900,
-        480
+        880,
+        2640
       ]
     },
     {
       "parameters": {
-        "jsCode": "const row = $input.first().json.sheetRow;\nreturn [{ json: row }];"
+        "jsCode": "const row = $input.first().json.sheetRow;\nreturn [{\n  json: {\n    call_id: row.call_id,\n    date: row.date,\n    time: row.time,\n    caller: row.caller,\n    action: row.action,\n    details: row.details,\n    status: row.status,\n  },\n}];\n"
       },
-      "id": "88888888-8888-4888-8888-888888888888",
+      "id": "40aeac38-d509-43ba-984f-e653b0cfe991",
       "name": "Extract Action Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
-        400
+        1104,
+        2560
       ]
     },
     {
@@ -306,37 +449,98 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "PASTE_YOUR_GOOGLE_SHEET_ID",
-          "mode": "id"
+          "value": "17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw",
+          "mode": "list",
+          "cachedResultName": "ResilienceSoft Voice Logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17_VF64G6jJ9MtE9gtJ6fKZ_iIeWwjApZuGuPoc672Zw/edit?usp=drivesdk"
         },
         "sheetName": {
           "__rl": true,
           "value": "voice_actions",
-          "mode": "name"
+          "mode": "name",
+          "cachedResultName": "voice_actions"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "call_id": "={{ $json.call_id }}",
-            "date": "={{ $json.date }}",
-            "time": "={{ $json.time }}",
-            "caller": "={{ $json.caller }}",
-            "action": "={{ $json.action }}",
-            "details": "={{ $json.details }}",
-            "status": "={{ $json.status }}"
-          },
+          "mappingMode": "autoMapInputData",
+          "value": {},
           "matchingColumns": [],
-          "schema": []
+          "schema": [
+            {
+              "id": "call_id",
+              "displayName": "call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "caller",
+              "displayName": "caller",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "details",
+              "displayName": "details",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
         },
         "options": {}
       },
-      "id": "77777777-7777-4777-8777-777777777777",
+      "id": "8707f248-0b32-4efd-b152-2b778172d024",
       "name": "Append Voice Action Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        1340,
-        400
+        1328,
+        2560
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -349,13 +553,13 @@
       "parameters": {
         "jsCode": "const h = $('Handle Action').first().json;\nconst { sheetRow, ...response } = h;\nreturn [{ json: response }];"
       },
-      "id": "66666666-6666-4666-8666-666666666666",
+      "id": "9bbde21e-6908-4a36-9aa8-5c9497b3e956",
       "name": "Action Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
-        560
+        1328,
+        2720
       ]
     },
     {
@@ -364,29 +568,17 @@
         "responseBody": "={{ JSON.stringify($json) }}",
         "options": {}
       },
-      "id": "33333333-3333-4333-8333-333333333333",
+      "id": "43f7416d-9d60-4250-be41-bd6d754b0629",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1560,
-        360
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Only 8 fields — prevents Google Sheets from creating extra columns\nconst b = $('Build Call Log').first().json;\nreturn [\n  {\n    json: {\n      call_id: b.call_id,\n      date: b.date,\n      time: b.time,\n      caller: b.caller,\n      duration: b.duration,\n      topic: b.topic,\n      summary: b.summary,\n      next_step: b.next_step,\n    },\n  },\n];\n"
-      },
-      "id": "11112222-2222-4222-8222-222222222222",
-      "name": "Voice Calls Row",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        800,
-        280
+        1536,
+        2512
       ]
     }
   ],
+  "pinData": {},
   "connections": {
     "Webhook": {
       "main": [
@@ -421,7 +613,7 @@
       "main": [
         [
           {
-            "node": "Upsert Voice Transcript Sheet",
+            "node": "Voice Transcripts Row",
             "type": "main",
             "index": 0
           },
@@ -433,9 +625,31 @@
         ]
       ]
     },
+    "Voice Transcripts Row": {
+      "main": [
+        [
+          {
+            "node": "Upsert Voice Transcript Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Upsert Voice Transcript Sheet": {
       "main": [
         []
+      ]
+    },
+    "Voice Calls Row": {
+      "main": [
+        [
+          {
+            "node": "Upsert Voice Call Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Upsert Voice Call Sheet": {
@@ -550,21 +764,14 @@
           }
         ]
       ]
-    },
-    "Voice Calls Row": {
-      "main": [
-        [
-          {
-            "node": "Upsert Voice Call Sheet",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "active": false
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
 }
