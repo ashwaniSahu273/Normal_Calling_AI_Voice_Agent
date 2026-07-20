@@ -37,6 +37,12 @@ Caller -> Exotel/Plivo -> WebSocket /exotel/stream or /plivo/stream
 | `audio.py` | PCM/mu-law, resampling, Exotel frame buffer |
 | `n8n/voice_agent_actions.json` | Importable n8n stub |
 
+See **[docs/VOICE_AND_PERSONA.md](docs/VOICE_AND_PERSONA.md)** for voice names, LLM options, and persona tuning.
+
+## Phase 1 (stability + RAG + Sheets)
+
+See **[docs/PHASE1_SETUP_GUIDE.md](docs/PHASE1_SETUP_GUIDE.md)** for Google Sheet tabs, n8n import, env vars, and tests.
+
 ## Setup
 
 ```bash

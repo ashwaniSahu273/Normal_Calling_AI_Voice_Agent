@@ -90,6 +90,31 @@ def load_business_knowledge(force: bool = False) -> str:
     return _cached
 
 
+def _build_persona_block() -> str:
+    """Friendly receptionist persona — tune via AGENT_NAME and VOICE_PERSONA in .env."""
+    name = (config.AGENT_NAME or "").strip()
+    custom = (config.VOICE_PERSONA or "").strip()
+    voice = (config.VOICE or "Erinome").strip()
+
+    lines = [
+        "PERSONA (how you sound on the phone):",
+        "- You are a real human receptionist, not a robot. Smile in your voice.",
+        "- Pace: calm, medium speed. Pause briefly after the caller finishes.",
+        "- Tone: respectful, helpful, confident — never pushy or overly casual.",
+        "- Empathy: if they sound confused or upset, acknowledge once, then help.",
+        "- Avoid: filler spam (um, basically), listing more than 2 facts in one turn.",
+        f"- TTS voice profile: {voice} (keep delivery natural for phone audio).",
+    ]
+    if name:
+        lines.insert(
+            1,
+            f"- Your name is {name}. Introduce yourself only if asked; otherwise just help.",
+        )
+    if custom:
+        lines.append(f"- Owner style guide: {custom}")
+    return "\n".join(lines)
+
+
 def build_system_prompt() -> str:
     """Behavior rules + bilingual policy + company facts."""
     base = (config.SYSTEM_PROMPT_BASE or "").strip()
@@ -118,6 +143,8 @@ def build_system_prompt() -> str:
         "and use tools when available — do not invent facts."
     )
 
+    persona_block = _build_persona_block()
+
     hangup_block = (
         "CALL END (strict):\n"
         "- Keep the conversation going across many questions. Do NOT end after answering 1–3 FAQs.\n"
@@ -129,10 +156,71 @@ def build_system_prompt() -> str:
         "(who called, what they wanted, next step)."
     )
 
-    chunks = [base, language_block, style_block, hangup_block]
+    chunks = [base, language_block, persona_block, style_block, hangup_block]
     if knowledge:
         chunks.append(f"COMPANY KNOWLEDGE (use for accurate answers):\n{knowledge}")
     if config.BUSINESS_WEBSITE:
         chunks.append(f"Official website: {config.BUSINESS_WEBSITE}")
 
+    rag_note = (
+        "KNOWLEDGE TOOL:\n"
+        "- For specific pricing, packages, policies, or details not clearly above, "
+        "call lookup_knowledge with a short search query before answering.\n"
+        "- Speak only from tool results + facts above; never invent numbers."
+    )
+    chunks.append(rag_note)
+
     return "\n\n".join(chunks)
+
+
+def _tokenize(query: str) -> list[str]:
+    raw = re.findall(r"[a-zA-Z0-9\u0900-\u097f]+", query.lower())
+    return [t for t in raw if len(t) > 1]
+
+
+def search_knowledge(query: str, max_chars: int | None = None) -> str:
+    """
+    Lightweight local RAG: score paragraphs in loaded knowledge by keyword overlap.
+    Use for lookup_knowledge when n8n/backend search is not configured.
+    """
+    limit = max_chars or config.KNOWLEDGE_SEARCH_MAX_CHARS
+    q = (query or "").strip()
+    if not q:
+        return ""
+
+    corpus = load_business_knowledge()
+    if not corpus:
+        return ""
+
+    tokens = _tokenize(q)
+    if not tokens:
+        return ""
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n(?=[#*-])", corpus) if p.strip()]
+    if not paragraphs:
+        paragraphs = [corpus]
+
+    scored: list[tuple[int, str]] = []
+    for para in paragraphs:
+        low = para.lower()
+        score = sum(2 if tok in low else 0 for tok in tokens)
+        # heading / bullet boost
+        if para.lstrip().startswith(("#", "-", "*")):
+            score += 1
+        if score > 0:
+            scored.append((score, para))
+
+    scored.sort(key=lambda x: (-x[0], -len(x[1])))
+    if not scored:
+        return ""
+
+    parts: list[str] = []
+    total = 0
+    for _, para in scored[:6]:
+        chunk = para if len(para) <= 400 else para[:397] + "…"
+        if total + len(chunk) > limit:
+            break
+        parts.append(chunk)
+        total += len(chunk) + 2
+
+    return "\n\n".join(parts).strip()

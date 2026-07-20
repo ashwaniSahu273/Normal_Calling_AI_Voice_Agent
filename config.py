@@ -24,6 +24,16 @@ OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime").strip
 # Female clear voices (Gemini): Erinome (Clear), Kore (Firm), Aoede (Breezy), Achernar (Soft)
 VOICE = os.getenv("VOICE", "Erinome").strip()
 
+# Persona (spoken style — see docs/VOICE_AND_PERSONA.md)
+AGENT_NAME = os.getenv("AGENT_NAME", "").strip()
+VOICE_PERSONA = os.getenv("VOICE_PERSONA", "").strip()
+
+# Google Sheet: short conversation cell on voice_calls tab
+SHEET_CONVERSATION_PREVIEW_TURNS = int(os.getenv("SHEET_CONVERSATION_PREVIEW_TURNS", "5"))
+SHEET_CONVERSATION_PREVIEW_MAX_CHARS = int(
+    os.getenv("SHEET_CONVERSATION_PREVIEW_MAX_CHARS", "300")
+)
+
 PUBLIC_HOST = os.getenv("PUBLIC_HOST", "").strip()
 PORT = int(os.getenv("PORT", "5000"))
 
@@ -79,6 +89,19 @@ AI_RESPONSE_NUDGE_SEC = float(os.getenv("AI_RESPONSE_NUDGE_SEC", "3.5"))
 GEMINI_SILENCE_MS = int(os.getenv("GEMINI_SILENCE_MS", "400"))
 GEMINI_PREFIX_PADDING_MS = int(os.getenv("GEMINI_PREFIX_PADDING_MS", "20"))
 GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
+
+# Soft session reset — keeps long calls responsive (new Live session + digest)
+GEMINI_SOFT_RESET_EVERY_TURNS = int(os.getenv("GEMINI_SOFT_RESET_EVERY_TURNS", "12"))
+GEMINI_SOFT_RESET_EVERY_SEC = float(os.getenv("GEMINI_SOFT_RESET_EVERY_SEC", "240"))
+GEMINI_DIGEST_MAX_CHARS = int(os.getenv("GEMINI_DIGEST_MAX_CHARS", "1200"))
+
+# lookup_knowledge: search local file first, then n8n action lookup_knowledge
+KNOWLEDGE_SEARCH_LOCAL_FIRST = os.getenv("KNOWLEDGE_SEARCH_LOCAL_FIRST", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+KNOWLEDGE_SEARCH_MAX_CHARS = int(os.getenv("KNOWLEDGE_SEARCH_MAX_CHARS", "2000"))
 
 TELEPHONY_SAMPLE_RATE = 8000
 PLIVO_CONTENT_TYPE = "audio/x-mulaw"

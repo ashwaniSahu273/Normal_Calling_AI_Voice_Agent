@@ -12,6 +12,13 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 import audio
 import config
+from call_digest import (
+    build_call_digest,
+    count_transcript_turns,
+    detect_language_hint,
+    format_conversation_full,
+    format_conversation_preview,
+)
 from provider_base import (
     AudioDelta,
     EndCallRequested,
@@ -52,6 +59,11 @@ class CallBridge:
         self._awaiting_ai_since: float | None = None
         self._nudge_task: asyncio.Task | None = None
         self._nudge_count = 0
+        self._appointment_booked = False
+        self._lead_captured = False
+        self._follow_up = "none"
+        self._direction = "inbound"
+        self._soft_reset_busy = False
 
     async def run(self) -> None:
         await self.tel_ws.accept()
@@ -248,6 +260,7 @@ class CallBridge:
                     self._touch()
                     if self.telephony == "exotel":
                         await self._flush_exotel()
+                    await self._maybe_soft_reset_session()
                 elif isinstance(ev, TranscriptDelta):
                     if ev.text:
                         self._transcript.append({"role": ev.role, "text": ev.text})
@@ -322,8 +335,9 @@ class CallBridge:
     async def _handle_tool_call(self, call: ToolCall) -> None:
         assert self.provider is not None
         log.info("Tool call: %s(%s)", call.name, call.arguments)
-        ctx = {"call_id": self.call_id, "from": self.caller}
-        result = await dispatch_tool(call.name, call.arguments, ctx)
+        ctx = {"call_id": self._stable_call_id(), "from": self.caller}
+        payload_ctx = {**ctx, "direction": self._direction, "language": detect_language_hint(self._transcript)}
+        result = await dispatch_tool(call.name, call.arguments, payload_ctx)
         await self.provider.send_tool_result(call.call_id, call.name, result)
 
         if call.name == "end_call":
@@ -332,6 +346,42 @@ class CallBridge:
             self._caller_intent = str(call.arguments.get("caller_intent") or "")
             log.info("end_call reason=%s", self._end_reason)
             await self._request_hangup()
+            return
+
+        if call.name == "book_appointment":
+            self._appointment_booked = True
+            self._follow_up = "appointment"
+        elif call.name == "create_lead":
+            self._lead_captured = True
+            if self._follow_up == "none":
+                self._follow_up = "callback"
+        elif call.name == "send_notification":
+            if self._follow_up == "none":
+                self._follow_up = "team_notified"
+
+    async def _maybe_soft_reset_session(self) -> None:
+        if self._closing or self._soft_reset_busy or self.provider is None:
+            return
+        if not self.provider.needs_soft_reset():
+            return
+        self._soft_reset_busy = True
+        try:
+            digest = build_call_digest(
+                self._transcript,
+                caller_intent=self._guess_intent(),
+                max_chars=config.GEMINI_DIGEST_MAX_CHARS,
+            )
+            await self.provider.refresh_session(digest)
+            log.info("Soft session reset completed call_id=%s", self.call_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Soft session reset failed")
+        finally:
+            self._soft_reset_busy = False
+
+    def _stable_call_id(self) -> str:
+        if self.call_id:
+            return str(self.call_id)
+        return f"voice-{int(self._started_at * 1000)}"
 
     def _conversation_text(self) -> str:
         if not self._transcript:
@@ -400,7 +450,13 @@ class CallBridge:
     async def _notify_call_ended(self) -> None:
         duration = int(time.monotonic() - self._started_at)
         summary = (self._end_summary or self._fallback_summary()).strip()
-        conversation = self._conversation_text()
+        conversation_full = self._conversation_text()
+        conversation_preview = format_conversation_preview(
+            self._transcript,
+            max_turns=config.SHEET_CONVERSATION_PREVIEW_TURNS,
+            max_total_chars=config.SHEET_CONVERSATION_PREVIEW_MAX_CHARS,
+        )
+        transcript_turns = count_transcript_turns(self._transcript)
         intent = self._guess_intent()
         outcome = self._friendly_outcome()
         # IST wall clock for the sheet
@@ -412,25 +468,35 @@ class CallBridge:
             now_ist = datetime.now(timezone.utc)
         date_str = now_ist.strftime("%Y-%m-%d")
         time_str = now_ist.strftime("%I:%M %p")
+        language = detect_language_hint(self._transcript)
+        yes_no = lambda b: "yes" if b else "no"  # noqa: E731
 
         args = {
-            # Friendly fields for Google Sheet / WhatsApp
+            "call_id": self._stable_call_id(),
             "date": date_str,
             "time_ist": time_str,
             "caller_phone": self.caller or "",
             "duration": self._format_duration(duration),
             "duration_sec": duration,
+            "direction": self._direction,
+            "language": language,
             "outcome": outcome,
             "caller_intent": intent,
             "summary": summary,
-            "conversation": conversation,
-            # Back-compat aliases
-            "transcript": conversation,
+            "conversation_preview": conversation_preview,
+            "conversation_full": conversation_full,
+            "transcript_turns": transcript_turns,
+            "transcript_ref": "voice_transcripts tab",
+            "conversation": conversation_preview,
+            "transcript": conversation_full,
+            "appointment_booked": yes_no(self._appointment_booked),
+            "lead_captured": yes_no(self._lead_captured),
+            "follow_up": self._follow_up,
             "reason": self._end_reason,
             "ended_at": datetime.now(timezone.utc).isoformat(),
             "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
         }
-        ctx = {"call_id": self.call_id, "from": self.caller}
+        ctx = {"call_id": self._stable_call_id(), "from": self.caller}
         try:
             await call_n8n("call_ended", args, ctx)
         except Exception:  # noqa: BLE001

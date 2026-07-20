@@ -1,1 +1,1 @@
-date,time_ist,caller_phone,duration,outcome,caller_intent,summary,conversation,business_name,call_id
+call_id,date,time_ist,caller_phone,duration_sec,duration,direction,language,outcome,caller_intent,summary,conversation_preview,transcript_turns,appointment_booked,lead_captured,follow_up,business_name

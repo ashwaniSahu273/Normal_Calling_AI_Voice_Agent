@@ -44,6 +44,25 @@ TOOL_DEFS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "lookup_knowledge",
+        "description": (
+            "Search company knowledge for specific facts (pricing, services, policies, timelines). "
+            "Use when the caller asks something not clearly in your short memory. "
+            "Pass a short search phrase, then answer from the tool result only."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Short search phrase e.g. 'website development pricing' or 'CRM features'",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
         "name": "send_notification",
         "description": "Notify the business team about a message or callback request.",
         "parameters": {
@@ -110,6 +129,23 @@ async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any
                 "reason": arguments.get("reason") or "completed",
             }
         )
+    if name == "lookup_knowledge":
+        query = str(arguments.get("query") or "").strip()
+        if config.KNOWLEDGE_SEARCH_LOCAL_FIRST and query:
+            from knowledge import search_knowledge
+
+            local = search_knowledge(query)
+            if local:
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "source": "local",
+                        "query": query,
+                        "results": local,
+                        "message": "Use these facts in your spoken reply. Do not read verbatim lists.",
+                    }
+                )
+        return await call_n8n("lookup_knowledge", arguments, ctx)
     if name == "trigger_business_action":
         action = str(arguments.get("action", "unknown"))
         args = arguments.get("details", {}) or {}
@@ -129,6 +165,8 @@ async def call_n8n(action: str, args: dict[str, Any], ctx: dict[str, Any]) -> st
         "args": args,
         "call_id": ctx.get("call_id"),
         "from": ctx.get("from"),
+        "direction": ctx.get("direction", "inbound"),
+        "language": ctx.get("language"),
         "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
         "business_name": config.BUSINESS_NAME,
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, AsyncIterator
 
 from google import genai
@@ -90,6 +91,45 @@ class GeminiLiveProvider(RealtimeProvider):
         self._closed = False
         self._send_lock = asyncio.Lock()
         self._greeted = False
+        self._user_turns = 0
+        self._session_started = time.monotonic()
+
+    def _should_soft_reset(self) -> bool:
+        if config.GEMINI_SOFT_RESET_EVERY_TURNS <= 0 and config.GEMINI_SOFT_RESET_EVERY_SEC <= 0:
+            return False
+        elapsed = time.monotonic() - self._session_started
+        if (
+            config.GEMINI_SOFT_RESET_EVERY_SEC > 0
+            and elapsed >= config.GEMINI_SOFT_RESET_EVERY_SEC
+        ):
+            return True
+        if (
+            config.GEMINI_SOFT_RESET_EVERY_TURNS > 0
+            and self._user_turns >= config.GEMINI_SOFT_RESET_EVERY_TURNS
+        ):
+            return True
+        return False
+
+    async def refresh_session(self, digest: str = "") -> None:
+        """New Live session with conversation digest (reduces long-call latency)."""
+        if self._closed:
+            return
+        log.info("Gemini soft session reset (turns=%s)", self._user_turns)
+        self._resume_handle = None
+        self._user_turns = 0
+        self._session_started = time.monotonic()
+        await self._open_session(greet=False)
+        hint = (
+            "The phone call is still active. Continue as the same receptionist.\n"
+            "Do NOT call end_call. Do NOT greet from scratch.\n"
+        )
+        if digest.strip():
+            hint += f"Context to remember:\n{digest.strip()}\n"
+        hint += "Ask briefly how you can help next, then listen."
+        await self.nudge(hint)
+
+    def needs_soft_reset(self) -> bool:
+        return self._should_soft_reset()
 
     def _live_config(self) -> types.LiveConnectConfig:
         system_prompt = knowledge.build_system_prompt()
@@ -233,6 +273,7 @@ class GeminiLiveProvider(RealtimeProvider):
                             text = in_t.text.strip()
                             finished = getattr(in_t, "finished", None)
                             if text and finished is not False:
+                                self._user_turns += 1
                                 yield TranscriptDelta(role="user", text=text)
 
                         out_t = server_content.output_transcription

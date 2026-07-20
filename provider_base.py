@@ -68,6 +68,13 @@ class RealtimeProvider(abc.ABC):
         """Optional: ask the model to speak if it went quiet mid-call."""
         return
 
+    async def refresh_session(self, digest: str = "") -> None:
+        """Optional: soft-reset AI session mid-call (latency / context trim)."""
+        return
+
+    def needs_soft_reset(self) -> bool:
+        return False
+
     @abc.abstractmethod
     async def close(self) -> None: ...
 
