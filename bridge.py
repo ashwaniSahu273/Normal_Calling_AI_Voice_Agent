@@ -20,6 +20,7 @@ from call_digest import (
     detect_language_hint,
     format_conversation_full,
     format_conversation_preview,
+    infer_topic_label,
     merge_transcript_line,
     pick_summary_for_sheet,
     sheet_next_step_label,
@@ -517,22 +518,7 @@ class CallBridge:
     def _guess_intent(self) -> str:
         if self._caller_intent:
             return self._caller_intent
-        user_bits = " ".join(t["text"] for t in self._transcript if t["role"] == "user").lower()
-        checks = [
-            ("website", "Website / web development"),
-            ("app", "Mobile app"),
-            ("crm", "CRM / WhatsApp CRM"),
-            ("hosting", "Hosting"),
-            ("seo", "SEO / marketing"),
-            ("demo", "Product demo"),
-            ("price", "Pricing enquiry"),
-            ("callback", "Callback request"),
-            ("hindi", "General enquiry (Hindi)"),
-        ]
-        for key, label in checks:
-            if key in user_bits:
-                return label
-        return "General enquiry"
+        return infer_topic_label(self._transcript, "")
 
     def _friendly_outcome(self) -> str:
         mapping = {

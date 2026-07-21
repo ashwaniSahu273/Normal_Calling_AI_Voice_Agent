@@ -85,7 +85,124 @@ def merge_transcript_line(
             return
         if prev.startswith(text):
             return
+        if _should_join_utterance(prev, text):
+            transcript[-1]["text"] = f"{prev} {text}".strip()
+            return
     transcript.append({"role": role, "text": text})
+
+
+def _should_join_utterance(prev: str, new: str) -> bool:
+    """Join STT word shards on the same speaker turn."""
+    if not prev or not new:
+        return False
+    p, n = prev.strip(), new.strip()
+    if p.endswith((".", "?", "!")) and len(n) > 8:
+        return False
+    if len(n.split()) <= 2 and len(n) < 22:
+        return True
+    if len(p.split()) <= 4 and len(p) < 28:
+        return True
+    if len(n) < 18 and not n.endswith((".", "?", "!")):
+        return True
+    return False
+
+
+def coalesce_role_runs(transcript: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Merge back-to-back lines from the same speaker (summary + transcript cleanup)."""
+    out: list[dict[str, str]] = []
+    for entry in transcript:
+        role = entry.get("role", "")
+        text = " ".join((entry.get("text") or "").split()).strip()
+        if not text:
+            continue
+        if out and out[-1]["role"] == role:
+            prev = out[-1]["text"]
+            if text.startswith(prev):
+                out[-1]["text"] = text
+            elif prev.startswith(text):
+                continue
+            else:
+                out[-1]["text"] = f"{prev} {text}".strip()
+        else:
+            out.append({"role": role, "text": text})
+    return out
+
+
+def _is_meaningful_caller_text(text: str) -> bool:
+    t = " ".join((text or "").split()).strip()
+    if not t or user_wants_to_end(t):
+        return False
+    words = t.split()
+    if len(words) >= 3:
+        return True
+    if len(t) >= 20:
+        return True
+    if "?" in t:
+        return True
+    if len(words) == 1 and len(words[0]) < 10:
+        return False
+    if len(t) < 14:
+        return False
+    return True
+
+
+def infer_topic_label(
+    transcript: list[dict[str, str]], caller_intent: str = ""
+) -> str:
+    if (caller_intent or "").strip() and caller_intent.strip().lower() not in (
+        "general enquiry",
+        "general inquiry",
+    ):
+        return caller_intent.strip()
+    blob = " ".join(
+        (e.get("text") or "")
+        for e in coalesce_role_runs(transcript)
+        if e.get("role") == "user"
+    ).lower()
+    checks = [
+        (("digital marketing", "marketing", "seo", "social media"), "Digital marketing"),
+        (("appointment", "book a", "booking", "schedule"), "Appointment booking"),
+        (("website", "web design", "web development"), "Website / web development"),
+        (("mobile app", "android", "ios app", "application"), "Mobile app"),
+        (("crm", "whatsapp crm"), "CRM / WhatsApp CRM"),
+        (("hosting", "domain"), "Hosting"),
+        (("demo", "demonstration"), "Product demo"),
+        (("price", "pricing", "cost", "quote", "package"), "Pricing enquiry"),
+        (("callback", "call back", "call me back"), "Callback request"),
+    ]
+    for keys, label in checks:
+        if any(k in blob for k in keys):
+            return label
+    return caller_intent.strip() or "General enquiry"
+
+
+def _cleanup_stt(text: str) -> str:
+    t = " ".join((text or "").split())
+    fixes = (
+        (r"\bappoint\s+ment\b", "appointment"),
+        (r"\bdigi\s+tal\b", "digital"),
+        (r"\bmark\s+eting\b", "marketing"),
+        (r"\bdevel\s+opment\b", "development"),
+    )
+    for pat, repl in fixes:
+        t = re.sub(pat, repl, t, flags=re.I)
+    return t.strip()
+
+
+def _natural_request(text: str) -> str:
+    t = _cleanup_stt(text)
+    t = re.sub(
+        r"^(hi|hello|hey|yes|yeah|ok|okay|namaste|i want to|i want|i need to|i need|"
+        r"please|can you|could you|tell me|mujhe|main|want to|want)\s+",
+        "",
+        t,
+        flags=re.I,
+    ).strip()
+    if not t:
+        t = _cleanup_stt(text)
+    if len(t) > 1:
+        t = t[0].lower() + t[1:]
+    return _shorten(t, 160)
 
 
 def _substantive_user_lines(transcript: list[dict[str, str]]) -> list[str]:
@@ -162,10 +279,11 @@ def build_call_digest(
 
 def format_conversation_full(transcript: list[dict[str, str]]) -> str:
     """Multi-line transcript for voice_transcripts tab (not the main log)."""
-    if not transcript:
+    merged = coalesce_role_runs(transcript)
+    if not merged:
         return ""
     lines: list[str] = []
-    for entry in transcript:
+    for entry in merged:
         role = entry.get("role", "")
         text = (entry.get("text") or "").strip()
         if not text:
@@ -283,15 +401,172 @@ def is_poor_summary(text: str) -> bool:
     low = text.lower()
     if "caller said:" in low or "agent explained:" in low or "agent covered:" in low:
         return True
+    if "key ask:" in low or "caller wanted:" in low or "agent shared:" in low:
+        return True
+    if low.count("caller:") >= 1 or low.count("agent:") >= 1:
+        return True
     if low.count("caller:") >= 2 or low.count("agent:") >= 2:
         return True
     if text.count("|") >= 3:
         return True
-    if text.count("\n") > 2:
+    if text.count("\n") > 1:
         return True
     if text.strip().startswith("[") and "turns]" in low:
         return True
+    if re.match(r"^c:\s", low) or " · a:" in low or " · c:" in low:
+        return True
+    if low.count("they also asked") >= 2:
+        return True
+    if re.search(r"they (also )?asked about \w+\.", low):
+        return True
     return False
+
+
+def _embed_question(text: str) -> str:
+    t = _shorten(text, 100).strip().rstrip(".")
+    if not t:
+        return "for more information"
+    if "?" in t or re.match(
+        r"^(what|how|when|where|why|who|can|could|do|does|is|are|will|kya|kaise|kitna|kab)\b",
+        t,
+        re.I,
+    ):
+        q = t if t.endswith("?") else f"{t}?"
+        return q[0].lower() + q[1:] if len(q) > 1 else q.lower()
+    low = t[0].lower() + t[1:] if len(t) > 1 else t.lower()
+    return f"about {low}"
+
+
+def _embed_answer(text: str) -> str:
+    t = _shorten(text, 130).strip().rstrip(".")
+    if not t:
+        return "responded briefly"
+    low = t[0].lower() + t[1:] if len(t) > 1 else t.lower()
+    starters = ("we ", "our ", "yes", "no", "the ", "i ", "haan", "ji ", "sure")
+    if low.startswith(starters):
+        return f"explained that {low}"
+    return f"responded: {low}"
+
+
+def _collect_exchanges(
+    transcript: list[dict[str, str]],
+) -> list[tuple[str, str]]:
+    """Ordered (caller turn, agent reply) after coalescing STT shards."""
+    entries = coalesce_role_runs(transcript)
+    pairs: list[tuple[str, str]] = []
+    i = 0
+    while i < len(entries):
+        if entries[i].get("role") != "user":
+            i += 1
+            continue
+        chunk_parts: list[str] = []
+        while i < len(entries) and entries[i].get("role") == "user":
+            part = " ".join((entries[i].get("text") or "").split()).strip()
+            if part and not user_wants_to_end(part):
+                chunk_parts.append(part)
+            i += 1
+        u = " ".join(chunk_parts).strip()
+        if not u or not _is_meaningful_caller_text(u):
+            continue
+        agent_reply = ""
+        if i < len(entries) and entries[i].get("role") == "assistant":
+            agent_reply = " ".join((entries[i].get("text") or "").split()).strip()
+            i += 1
+        pairs.append((u, agent_reply))
+    return pairs
+
+
+def narrate_call_in_english(
+    transcript: list[dict[str, str]],
+    *,
+    caller_intent: str = "",
+    follow_up: str = "none",
+    appointment_booked: bool = False,
+    lead_captured: bool = False,
+    outcome: str = "",
+) -> str:
+    """Short third-person story of the call — no STT word shards."""
+    topic = infer_topic_label(transcript, caller_intent)
+    topic_phrase = topic.lower() if topic != "General enquiry" else "their enquiry"
+    exchanges = _collect_exchanges(transcript)
+    coalesced = coalesce_role_runs(transcript)
+
+    user_blocks = [
+        e["text"]
+        for e in coalesced
+        if e.get("role") == "user" and _is_meaningful_caller_text(e["text"])
+    ]
+    agent_blocks = [
+        e["text"]
+        for e in coalesced
+        if e.get("role") == "assistant"
+        and len((e.get("text") or "").strip()) > 18
+        and not user_wants_to_end(e.get("text") or "")
+    ]
+
+    sentences: list[str] = [
+        f"The caller contacted the company regarding {topic_phrase}."
+    ]
+
+    if user_blocks:
+        main = _natural_request(user_blocks[0])
+        if len(user_blocks) > 1:
+            extra = _natural_request(" ".join(user_blocks[1:3]))
+            if extra and extra not in main:
+                sentences.append(
+                    f"They said they wanted {main}, and also mentioned {extra}."
+                )
+            else:
+                sentences.append(f"They said they wanted {main}.")
+        else:
+            if main.endswith("?"):
+                sentences.append(f"They asked {main}")
+            else:
+                sentences.append(f"They said they wanted {main}.")
+    elif exchanges:
+        q = _natural_request(exchanges[0][0])
+        sentences.append(
+            f"They asked {q}." if q.endswith("?") else f"They said they wanted {q}."
+        )
+    else:
+        sentences.append("The conversation was very short and few details were captured.")
+
+    if agent_blocks:
+        best = agent_blocks[-1]
+        for line in reversed(agent_blocks):
+            if len(line) > len(best):
+                best = line
+                break
+        sentences.append(f"The receptionist {_embed_answer(best)}.")
+    elif exchanges and exchanges[-1][1]:
+        sentences.append(f"The receptionist {_embed_answer(exchanges[-1][1])}.")
+
+    next_l = sheet_next_step_label(
+        follow_up,
+        appointment_booked=appointment_booked,
+        lead_captured=lead_captured,
+    )
+    if appointment_booked:
+        sentences.append("An appointment was booked during the call.")
+    elif lead_captured:
+        sentences.append("The agent captured the caller's details for a follow-up call.")
+    elif next_l and next_l not in ("None", ""):
+        sentences.append(f"Next step for the team: {next_l.lower()}.")
+
+    oc = (outcome or "").strip()
+    if oc and "hangup" not in oc.lower():
+        if "thanks" in oc.lower() or "goodbye" in oc.lower():
+            sentences.append("The caller ended the conversation politely.")
+        elif "silence" in oc.lower():
+            sentences.append("The call ended after a period of silence.")
+        elif "max" in oc.lower():
+            sentences.append("The call ended when the maximum call duration was reached.")
+        elif "hung up" in oc.lower():
+            sentences.append("The caller hung up before finishing the discussion.")
+        else:
+            sentences.append(f"The call ended ({oc.lower()}).")
+
+    return " ".join(sentences)[:480].strip()
 
 
 def compose_sheet_summary(
@@ -303,72 +578,28 @@ def compose_sheet_summary(
     lead_captured: bool = False,
     outcome: str = "",
 ) -> str:
-    """Plain-language owner summary for sheet / WhatsApp."""
-    topic = (caller_intent or "General enquiry").strip()
-    asks = [_shorten(q, 110) for q in _substantive_user_lines(transcript)]
-    if not asks and transcript:
-        for entry in transcript:
-            if entry.get("role") == "user":
-                t = (entry.get("text") or "").strip()
-                if t and not user_wants_to_end(t):
-                    asks.append(_shorten(t, 110))
-                    break
-
-    agent_lines = [
-        " ".join((entry.get("text") or "").split()).strip()
-        for entry in transcript
-        if entry.get("role") == "assistant"
-    ]
-    answers: list[str] = []
-    for line in reversed(agent_lines):
-        if user_wants_to_end(line) or len(line) < 20:
-            continue
-        answers.append(_shorten(line, 120))
-        if len(answers) >= 2:
-            break
-    answers.reverse()
-
-    parts: list[str] = []
-    if asks:
-        q_text = asks[0]
-        if len(asks) > 1:
-            q_text += f"; also asked: {asks[1]}"
-        if len(asks) > 2:
-            q_text += f" (+{len(asks) - 2} more)"
-        parts.append(f"Topic: {topic}. Caller wanted: {q_text}.")
-    else:
-        parts.append(f"Topic: {topic}. Short call with limited detail.")
-
-    if answers:
-        parts.append(f"Agent covered: {answers[-1]}.")
-        if len(answers) > 1:
-            parts[-1] = f"Agent covered: {answers[0]}; later: {answers[-1]}."
-
-    next_l = sheet_next_step_label(
-        follow_up,
+    return narrate_call_in_english(
+        transcript,
+        caller_intent=caller_intent,
+        follow_up=follow_up,
         appointment_booked=appointment_booked,
         lead_captured=lead_captured,
+        outcome=outcome,
     )
-    if next_l and next_l != "None":
-        parts.append(f"Next step: {next_l}.")
-    elif outcome and "hangup" not in outcome.lower():
-        parts.append(f"Call ended: {outcome}.")
-
-    return " ".join(parts)[:480].strip()
-
 
 def pick_summary_for_sheet(
     model_summary: str,
     transcript: list[dict[str, str]],
     **kwargs: Any,
 ) -> str:
-    composed = compose_sheet_summary(transcript, **kwargs)
+    """Sheet/WhatsApp always get third-person narrative from transcript."""
+    narrative = narrate_call_in_english(transcript, **kwargs)
+    if narrative and len(narrative) > 40:
+        return narrative[:480]
     model = (model_summary or "").strip()
-    if model and not is_poor_summary(model) and len(model) >= 50:
-        if composed and len(composed) > len(model) + 80:
-            return composed[:480]
+    if model and not is_poor_summary(model):
         return model[:480]
-    return composed
+    return narrative[:480] if narrative else (model[:480] if model else "Call completed.")
 
 
 def detect_language_hint(transcript: list[dict[str, str]]) -> str:
