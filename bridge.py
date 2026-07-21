@@ -15,11 +15,9 @@ import config
 from call_digest import (
     build_call_digest,
     build_owner_summary,
-    compose_sheet_summary,
     count_transcript_turns,
     detect_language_hint,
     format_conversation_full,
-    format_conversation_preview,
     infer_topic_label,
     merge_transcript_line,
     pick_summary_for_sheet,
@@ -505,15 +503,6 @@ class CallBridge:
         if self.call_id:
             return str(self.call_id)
         return f"voice-{int(self._started_at * 1000)}"
-
-    def _conversation_text(self) -> str:
-        if not self._transcript:
-            return "No spoken transcript captured."
-        lines: list[str] = []
-        for t in self._transcript:
-            who = "Caller" if t["role"] == "user" else "Agent"
-            lines.append(f"{who}: {t['text']}")
-        return "\n".join(lines)
 
     def _guess_intent(self) -> str:
         if self._caller_intent:

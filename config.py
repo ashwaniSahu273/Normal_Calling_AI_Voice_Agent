@@ -28,12 +28,6 @@ VOICE = os.getenv("VOICE", "Erinome").strip()
 AGENT_NAME = os.getenv("AGENT_NAME", "").strip()
 VOICE_PERSONA = os.getenv("VOICE_PERSONA", "").strip()
 
-# Google Sheet: short conversation cell on voice_calls tab
-SHEET_CONVERSATION_PREVIEW_TURNS = int(os.getenv("SHEET_CONVERSATION_PREVIEW_TURNS", "5"))
-SHEET_CONVERSATION_PREVIEW_MAX_CHARS = int(
-    os.getenv("SHEET_CONVERSATION_PREVIEW_MAX_CHARS", "300")
-)
-
 PUBLIC_HOST = os.getenv("PUBLIC_HOST", "").strip()
 PORT = int(os.getenv("PORT", "5000"))
 
@@ -47,7 +41,7 @@ BUSINESS_WEBSITE = os.getenv("BUSINESS_WEBSITE", "").strip()
 # Curated facts (best accuracy). Prefer this over raw website scrape.
 BUSINESS_CONTEXT = os.getenv("BUSINESS_CONTEXT", "").strip()
 # Optional markdown/text file with company FAQ, services, pricing notes
-_default_knowledge = _ROOT / "business_knowledge.md"
+_default_knowledge = _ROOT / "data" / "business_knowledge.md"
 BUSINESS_CONTEXT_FILE = os.getenv(
     "BUSINESS_CONTEXT_FILE",
     str(_default_knowledge) if _default_knowledge.is_file() else "",

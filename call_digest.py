@@ -297,38 +297,6 @@ def count_transcript_turns(transcript: list[dict[str, str]]) -> int:
     return sum(1 for t in transcript if (t.get("text") or "").strip())
 
 
-def format_conversation_preview(
-    transcript: list[dict[str, str]],
-    *,
-    max_turns: int = 5,
-    max_line_chars: int = 70,
-    max_total_chars: int = 300,
-) -> str:
-    """
-    Compact one-liner for voice_calls sheet — avoids huge wrapped cells.
-    """
-    total = count_transcript_turns(transcript)
-    if not total:
-        return "—"
-
-    tail = [t for t in transcript if (t.get("text") or "").strip()][-max_turns:]
-    parts: list[str] = []
-    for entry in tail:
-        role = entry.get("role", "")
-        text = (entry.get("text") or "").strip().replace("\n", " ")
-        if len(text) > max_line_chars:
-            text = text[: max_line_chars - 1].rstrip() + "…"
-        prefix = "C" if role == "user" else "A"
-        parts.append(f"{prefix}: {text}")
-
-    body = " · ".join(parts)
-    head = f"[{total} turns] "
-    room = max(40, max_total_chars - len(head))
-    if len(body) > room:
-        body = body[: room - 1].rstrip() + "…"
-    return head + body
-
-
 def user_wants_to_end(text: str) -> bool:
     """True when the caller is closing the call (thanks / goodbye / stop)."""
     t = (text or "").strip().lower()
@@ -420,21 +388,6 @@ def is_poor_summary(text: str) -> bool:
     if re.search(r"they (also )?asked about \w+\.", low):
         return True
     return False
-
-
-def _embed_question(text: str) -> str:
-    t = _shorten(text, 100).strip().rstrip(".")
-    if not t:
-        return "for more information"
-    if "?" in t or re.match(
-        r"^(what|how|when|where|why|who|can|could|do|does|is|are|will|kya|kaise|kitna|kab)\b",
-        t,
-        re.I,
-    ):
-        q = t if t.endswith("?") else f"{t}?"
-        return q[0].lower() + q[1:] if len(q) > 1 else q.lower()
-    low = t[0].lower() + t[1:] if len(t) > 1 else t.lower()
-    return f"about {low}"
 
 
 def _embed_answer(text: str) -> str:

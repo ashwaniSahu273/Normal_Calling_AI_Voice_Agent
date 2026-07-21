@@ -16,7 +16,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 
-OUT = Path(__file__).resolve().parent / "Voice_Agent_Complete_Flow_Guide.pdf"
+OUT = Path(__file__).resolve().parent.parent / "docs" / "Voice_Agent_Complete_Flow_Guide.pdf"
 
 NAVY = HexColor("#0F2744")
 TEAL = HexColor("#0D7377")

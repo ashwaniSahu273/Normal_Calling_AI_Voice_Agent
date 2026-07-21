@@ -10,7 +10,7 @@ Phase 1 adds **long-call stability** (Gemini soft reset), **local RAG** (`lookup
 |--------|------|--------|
 | Soft session reset | `provider_gemini.py`, `bridge.py` | New Gemini Live session every N turns or M minutes, with a short **digest** so the caller is not lost |
 | Call digest | `call_digest.py` | Builds digest text + detects `en` / `hi` / `mixed` for the sheet |
-| Local RAG | `knowledge.search_knowledge()`, `tools.lookup_knowledge` | Keyword search over `business_knowledge.md` before answering niche questions |
+| Local RAG | `knowledge.search_knowledge()`, `tools.lookup_knowledge` | Keyword search over `data/business_knowledge.md` before answering niche questions |
 | Rich call-end payload | `bridge.py` | Sends `call_id`, `duration_sec`, `direction`, `language`, `appointment_booked`, `lead_captured`, `follow_up` to n8n |
 | n8n workflow | `n8n/voice_agent_actions.json` | Upsert `voice_calls`, append `voice_actions`, improved summary + WhatsApp |
 
@@ -33,7 +33,7 @@ KNOWLEDGE_SEARCH_MAX_CHARS=2000
 |----------|--------|
 | `GEMINI_SOFT_RESET_EVERY_TURNS` | After this many **caller** utterances, refresh Gemini session (set `0` to disable) |
 | `GEMINI_SOFT_RESET_EVERY_SEC` | Or refresh after this many seconds on one call (set `0` to disable) |
-| `KNOWLEDGE_SEARCH_LOCAL_FIRST` | `lookup_knowledge` searches `business_knowledge.md` before calling n8n |
+| `KNOWLEDGE_SEARCH_LOCAL_FIRST` | `lookup_knowledge` searches `data/business_knowledge.md` before calling n8n |
 
 Restart the voice agent after changes:
 
@@ -112,7 +112,7 @@ flowchart LR
 
 ### A. Local RAG
 
-1. Ask something specific that is only in `business_knowledge.md` (e.g. a service name).
+1. Ask something specific that is only in `data/business_knowledge.md` (e.g. a service name).
 2. In logs you should see tool `lookup_knowledge`.
 3. AI should answer from file content, not invent prices.
 
@@ -162,7 +162,7 @@ Return JSON in n8n `Handle Action` for `lookup_knowledge` so the AI gets `result
 | Duplicate call rows | Use **Upsert** node; `call_id` column must exist and match |
 | Empty summary | Fill `end_call` summary or rely on **Build Call Log** fallback from conversation |
 | AI slow after 10 min | Lower `GEMINI_SOFT_RESET_EVERY_TURNS` (e.g. `8`) or `GEMINI_SOFT_RESET_EVERY_SEC` (e.g. `180`) |
-| `lookup_knowledge` empty | Expand `business_knowledge.md`; keep sections short with clear headings |
+| `lookup_knowledge` empty | Expand `data/business_knowledge.md`; keep sections short with clear headings |
 | n8n sheet errors | Sheet tab names exact: `voice_calls`, `voice_actions`; header row matches CSV |
 
 ---

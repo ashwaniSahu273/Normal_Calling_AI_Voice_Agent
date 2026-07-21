@@ -27,7 +27,34 @@ Caller -> Exotel/Plivo -> WebSocket /exotel/stream or /plivo/stream
       Tool call -> n8n webhook -> AI speaks result
 ```
 
-## Files
+## Project layout
+
+```
+app.py              # FastAPI entry (run: python app.py)
+bridge.py           # Call relay, hang-up, n8n post-call
+config.py           # Environment config
+audio.py            # PCM / mu-law, resampling, Exotel frames
+knowledge.py        # Business context + system prompt + local RAG
+call_digest.py      # Transcript merge, call summaries for Sheets
+tools.py            # AI tools → n8n webhooks
+provider_base.py    # AI provider interface
+provider_gemini.py  # Gemini Live
+provider_openai.py  # OpenAI Realtime
+plivo_xml.py        # Plivo answer XML
+
+data/
+  business_knowledge.md   # Company FAQ for the agent (edit this)
+
+n8n/
+  voice_agent_actions.json   # Import into n8n
+  build_call_log.js          # Source for Build Call Log node
+  *_headers.csv              # Google Sheet row-1 headers
+
+docs/                 # Guides and PDF flow doc
+scripts/              # PDF generator, n8n sync (optional)
+```
+
+## Files (runtime)
 
 | File | Purpose |
 |------|---------|
@@ -35,7 +62,7 @@ Caller -> Exotel/Plivo -> WebSocket /exotel/stream or /plivo/stream
 | `bridge.py` | Dual telephony relay + barge-in + n8n tools |
 | `provider_*.py` | Gemini / OpenAI backends |
 | `audio.py` | PCM/mu-law, resampling, Exotel frame buffer |
-| `n8n/voice_agent_actions.json` | Importable n8n stub |
+| `n8n/voice_agent_actions.json` | Importable n8n workflow |
 
 See **[docs/VOICE_AND_PERSONA.md](docs/VOICE_AND_PERSONA.md)** for voice names, LLM options, and persona tuning.
 
@@ -46,7 +73,6 @@ See **[docs/PHASE1_SETUP_GUIDE.md](docs/PHASE1_SETUP_GUIDE.md)** for Google Shee
 ## Setup
 
 ```bash
-cd voice-agent
 python -m venv .venv
 .venv\Scripts\Activate.ps1   # Windows
 pip install -r requirements.txt
