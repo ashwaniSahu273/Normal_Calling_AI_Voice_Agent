@@ -14,9 +14,7 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().lower()
 TELEPHONY_PROVIDER = os.getenv("TELEPHONY_PROVIDER", "exotel").strip().lower()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"
-).strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview").strip()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime").strip()
@@ -76,13 +74,23 @@ MAX_CALL_DURATION_SEC = float(os.getenv("MAX_CALL_DURATION_SEC", "600"))
 END_CALL_GRACE_SEC = float(os.getenv("END_CALL_GRACE_SEC", "2.5"))
 # RMS threshold on PCM16 to count inbound as speech (ignore line noise)
 SPEECH_RMS_THRESHOLD = int(os.getenv("SPEECH_RMS_THRESHOLD", "400"))
-# If caller spoke but AI stays quiet, nudge Gemini (seconds)
-AI_RESPONSE_NUDGE_SEC = float(os.getenv("AI_RESPONSE_NUDGE_SEC", "2.8"))
+# Nudge only if AI stays silent this long AFTER caller clearly finished (seconds)
+AI_RESPONSE_NUDGE_SEC = float(os.getenv("AI_RESPONSE_NUDGE_SEC", "4.5"))
 
-# Gemini VAD / latency — ~400ms is a good balance (too low cuts speech; too high feels slow)
-GEMINI_SILENCE_MS = int(os.getenv("GEMINI_SILENCE_MS", "400"))
-GEMINI_PREFIX_PADDING_MS = int(os.getenv("GEMINI_PREFIX_PADDING_MS", "20"))
+# Gemini VAD — silence after caller stops before model replies (ms). Higher = more patient listening.
+GEMINI_SILENCE_MS = int(os.getenv("GEMINI_SILENCE_MS", "580"))
+GEMINI_PREFIX_PADDING_MS = int(os.getenv("GEMINI_PREFIX_PADDING_MS", "24"))
+# high = ends caller turn quickly (can interrupt). low = wait through natural pauses.
+GEMINI_END_SPEECH_SENSITIVITY = os.getenv("GEMINI_END_SPEECH_SENSITIVITY", "low").strip().lower()
+# 2.5 Live: thinking_budget=0. 3.1 Live: use thinking_level (minimal = fastest)
 GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
+GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "minimal").strip().lower()
+# Context compression keeps long calls from slowing down (Live API)
+GEMINI_CONTEXT_COMPRESSION = os.getenv("GEMINI_CONTEXT_COMPRESSION", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Soft session reset — keeps long calls responsive (new Live session + digest)
 # Turn-based reset uses real caller Q&A turns in bridge (not STT fragments). 0 = time-only.
@@ -105,8 +113,12 @@ EXOTEL_SAMPLE_RATE = int(os.getenv("EXOTEL_SAMPLE_RATE", "8000"))
 OPENAI_AUDIO_FORMAT = "g711_ulaw"
 GEMINI_INPUT_RATE = 16000
 GEMINI_OUTPUT_RATE = 24000
-# Exotel min ~100ms @ 8kHz PCM16
-EXOTEL_FRAME_BYTES = int(os.getenv("EXOTEL_FRAME_BYTES", "3200"))
+# Exotel ~100ms PCM16 @ 8kHz = 1600 bytes (320-byte aligned). 3200 = ~200ms delay.
+EXOTEL_FRAME_BYTES = int(os.getenv("EXOTEL_FRAME_BYTES", "1600"))
+# Local audio: caller must be quiet this long before we treat their turn as finished
+SPEECH_END_GAP_SEC = float(os.getenv("SPEECH_END_GAP_SEC", "0.9"))
+# Do not nudge while caller spoke within this window (seconds)
+CALLER_LISTEN_GRACE_SEC = float(os.getenv("CALLER_LISTEN_GRACE_SEC", "1.4"))
 
 
 def validate() -> None:

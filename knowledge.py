@@ -16,6 +16,7 @@ _TAG_RE = re.compile(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>",
 _SPACE_RE = re.compile(r"\s+")
 
 _cached: str = ""
+_prompt_cached: str = ""
 
 
 def _strip_html(html: str) -> str:
@@ -59,6 +60,9 @@ def load_business_knowledge(force: bool = False) -> str:
     global _cached
     if _cached and not force:
         return _cached
+    if force:
+        global _prompt_cached
+        _prompt_cached = ""
 
     parts: list[str] = []
 
@@ -115,8 +119,12 @@ def _build_persona_block() -> str:
     return "\n".join(lines)
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(*, force: bool = False) -> str:
     """Behavior rules + bilingual policy + company facts."""
+    global _prompt_cached
+    if _prompt_cached and not force:
+        return _prompt_cached
+
     base = (config.SYSTEM_PROMPT_BASE or "").strip()
     knowledge = load_business_knowledge()
 
@@ -132,10 +140,19 @@ def build_system_prompt() -> str:
         "- Never mix long English paragraphs into a Hindi turn."
     )
 
+    listen_block = (
+        "LISTENING (critical on phone calls):\n"
+        "- After you ask a question, STOP talking and let the caller answer fully.\n"
+        "- Wait through short pauses — do not jump in after 1–2 seconds.\n"
+        "- Never ask the same question twice in a row. Never talk over the caller.\n"
+        "- Respond only when they have clearly finished their turn."
+    )
+
     style_block = (
         "VOICE STYLE:\n"
         "- Sound like a polite human receptionist: warm, clear, unhurried but brief.\n"
         "- Every spoken reply: max 2 short sentences. One question at a time.\n"
+        "- Reply as soon as you understand — do not pause to 'think' aloud.\n"
         "- Never monologue. Never read long website text aloud.\n"
         "- Prefer short confirmations: Yes / Haan / Sure / Theek hai.\n"
         "- Remember what the caller already told you in this call; do not re-ask the same thing.\n"
@@ -156,7 +173,7 @@ def build_system_prompt() -> str:
         "- end_call summary: 2–3 sentences for the owner (topic, what you answered, next step)."
     )
 
-    chunks = [base, language_block, persona_block, style_block, hangup_block]
+    chunks = [base, language_block, persona_block, listen_block, style_block, hangup_block]
     if knowledge:
         chunks.append(f"COMPANY KNOWLEDGE (use for accurate answers):\n{knowledge}")
     if config.BUSINESS_WEBSITE:
@@ -170,7 +187,8 @@ def build_system_prompt() -> str:
     )
     chunks.append(rag_note)
 
-    return "\n\n".join(chunks)
+    _prompt_cached = "\n\n".join(chunks)
+    return _prompt_cached
 
 
 def _tokenize(query: str) -> list[str]:

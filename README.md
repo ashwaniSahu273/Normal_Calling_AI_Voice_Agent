@@ -94,6 +94,8 @@ Put tunnel host (no `https://`) into `PUBLIC_HOST`. Health check:
 
 ## Exotel setup (primary)
 
+**Production numbers, inbound/outbound APIs, and doc links:** [docs/TELEPHONY_NUMBERS.md](docs/TELEPHONY_NUMBERS.md).
+
 Exotel India often still needs KYC before a live number works — check your dashboard. If you already have an Exotel account + number, use **Voicebot** (bidirectional), not Stream (one-way).
 
 1. App Bazaar → create / edit **Custom App** call flow.
@@ -108,7 +110,7 @@ Exotel India often still needs KYC before a live number works — check your das
 ### Exotel audio notes
 
 - Wire format: **raw PCM 16-bit little-endian** (not mu-law).
-- Outbound frames buffered to **~100ms (3200 bytes @ 8kHz)** per Exotel rules.
+- Outbound frames buffered to **~100ms (1600 bytes @ 8kHz PCM16)** per Exotel rules.
 - Barge-in uses Exotel `clear` event.
 
 ---

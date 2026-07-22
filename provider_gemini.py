@@ -25,6 +25,23 @@ from tools import TOOL_DEFS
 
 log = logging.getLogger("voice-agent.gemini")
 
+_THINKING_LEVEL_MAP = {
+    "minimal": types.ThinkingLevel.MINIMAL,
+    "low": types.ThinkingLevel.LOW,
+    "medium": types.ThinkingLevel.MEDIUM,
+    "high": types.ThinkingLevel.HIGH,
+}
+
+_END_SPEECH_MAP = {
+    "low": types.EndSensitivity.END_SENSITIVITY_LOW,
+    "high": types.EndSensitivity.END_SENSITIVITY_HIGH,
+}
+
+
+def _gemini_31_or_newer(model: str) -> bool:
+    m = (model or "").lower()
+    return "3.1" in m or "3-1" in m or m.startswith("gemini-3")
+
 _JSON_TYPE_MAP = {
     "object": types.Type.OBJECT,
     "string": types.Type.STRING,
@@ -129,8 +146,30 @@ class GeminiLiveProvider(RealtimeProvider):
     def needs_soft_reset(self) -> bool:
         return False
 
+    def _thinking_config(self) -> types.ThinkingConfig:
+        if _gemini_31_or_newer(config.GEMINI_MODEL):
+            level = _THINKING_LEVEL_MAP.get(
+                config.GEMINI_THINKING_LEVEL, types.ThinkingLevel.MINIMAL
+            )
+            return types.ThinkingConfig(thinking_level=level)
+        return types.ThinkingConfig(thinking_budget=config.GEMINI_THINKING_BUDGET)
+
+    def _end_speech_sensitivity(self) -> types.EndSensitivity:
+        return _END_SPEECH_MAP.get(
+            config.GEMINI_END_SPEECH_SENSITIVITY,
+            types.EndSensitivity.END_SENSITIVITY_LOW,
+        )
+
+    def _compression_config(self) -> types.ContextWindowCompressionConfig | None:
+        if not config.GEMINI_CONTEXT_COMPRESSION:
+            return None
+        return types.ContextWindowCompressionConfig(
+            trigger_tokens=12_000,
+            sliding_window=types.SlidingWindow(target_tokens=8_192),
+        )
+
     def _live_config(self) -> types.LiveConnectConfig:
-        system_prompt = knowledge.build_system_prompt()
+        system_prompt = (config.SYSTEM_PROMPT or "").strip() or knowledge.build_system_prompt()
         config.SYSTEM_PROMPT = system_prompt
         resume_kwargs: dict[str, Any] = {}
         if self._resume_handle:
@@ -144,12 +183,13 @@ class GeminiLiveProvider(RealtimeProvider):
                 )
             ),
             tools=_gemini_tools(),
-            thinking_config=types.ThinkingConfig(thinking_budget=config.GEMINI_THINKING_BUDGET),
+            thinking_config=self._thinking_config(),
+            context_window_compression=self._compression_config(),
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
                     disabled=False,
                     start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    end_of_speech_sensitivity=self._end_speech_sensitivity(),
                     prefix_padding_ms=config.GEMINI_PREFIX_PADDING_MS,
                     silence_duration_ms=config.GEMINI_SILENCE_MS,
                 )
@@ -226,8 +266,9 @@ class GeminiLiveProvider(RealtimeProvider):
         if self._session is None or self._closed:
             return
         text = hint or (
-            "The caller just spoke and is waiting. Reply now in ONE short sentence. "
-            "Do NOT call end_call. Keep the conversation going."
+            "The caller has finished speaking and is waiting for your answer. "
+            "Reply once in ONE or TWO short sentences. Do NOT ask a new question if you "
+            "already asked one they are answering. Do NOT call end_call."
         )
         try:
             async with self._send_lock:

@@ -24,7 +24,7 @@ async def _startup() -> None:
     import knowledge
 
     knowledge.load_business_knowledge(force=True)
-    config.SYSTEM_PROMPT = knowledge.build_system_prompt()
+    config.SYSTEM_PROMPT = knowledge.build_system_prompt(force=True)
     logging.getLogger("voice-agent").info(
         "Started ai=%s telephony=%s voice=%s silence_ms=%s knowledge_chars=%s",
         config.AI_PROVIDER,

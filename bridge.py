@@ -74,16 +74,49 @@ class CallBridge:
         self._soft_reset_epoch = time.monotonic()
         self._caller_turns_since_reset = 0
         self._user_spoke_this_cycle = False
+        self._caller_voice_active = False
+        self._last_caller_loud_at = 0.0
+        self._digest_sync_at = 0.0
 
-    def _sync_continuity_digest(self) -> None:
+    def _sync_continuity_digest(self, *, force: bool = False) -> None:
         if self.provider is None:
             return
+        now = time.monotonic()
+        if not force and (now - self._digest_sync_at) < 1.5:
+            return
+        self._digest_sync_at = now
         digest = build_call_digest(
             self._transcript,
             caller_intent=self._guess_intent(),
             max_chars=config.GEMINI_DIGEST_MAX_CHARS,
         )
         self.provider.set_continuity_digest(digest)
+
+    def _caller_is_listening_window(self) -> bool:
+        """True while caller may still be talking (do not nudge or treat turn as done)."""
+        now = time.monotonic()
+        if self._caller_voice_active:
+            return True
+        return (now - self._last_caller_loud_at) < config.CALLER_LISTEN_GRACE_SEC
+
+    def _note_caller_speech_energy(self, rms: int) -> None:
+        """Track caller speech; start nudge timer only after a clear pause."""
+        now = time.monotonic()
+        if rms >= config.SPEECH_RMS_THRESHOLD:
+            self._caller_voice_active = True
+            self._last_caller_loud_at = now
+            self._awaiting_ai_since = None
+            self._nudge_count = 0
+            return
+        if not self._caller_voice_active:
+            return
+        if (now - self._last_caller_loud_at) < config.SPEECH_END_GAP_SEC:
+            return
+        self._caller_voice_active = False
+        if self._farewell_pending or self._ai_speaking:
+            return
+        if self._awaiting_ai_since is None:
+            self._awaiting_ai_since = now
 
     def _bridge_needs_soft_reset(self) -> bool:
         if config.GEMINI_SOFT_RESET_EVERY_TURNS <= 0 and config.GEMINI_SOFT_RESET_EVERY_SEC <= 0:
@@ -175,6 +208,8 @@ class CallBridge:
             if self._farewell_pending:
                 continue
             if self._awaiting_ai_since is None or self._ai_speaking:
+                continue
+            if self._caller_is_listening_window():
                 continue
             waited = time.monotonic() - self._awaiting_ai_since
             if waited < config.AI_RESPONSE_NUDGE_SEC:
@@ -292,8 +327,10 @@ class CallBridge:
                     if payload:
                         pcm8k = self._decode_inbound(base64.b64decode(payload))
                         if pcm8k:
-                            if audio.pcm_rms(pcm8k) >= config.SPEECH_RMS_THRESHOLD:
+                            rms = audio.pcm_rms(pcm8k)
+                            if rms >= config.SPEECH_RMS_THRESHOLD:
                                 self._touch()
+                            self._note_caller_speech_energy(rms)
                             await self.provider.send_caller_audio(pcm8k)
                     continue
 
@@ -358,15 +395,22 @@ class CallBridge:
                     await self._send_audio(ev.pcm8k)
                 elif isinstance(ev, SpeechStarted):
                     self._touch()
+                    self._awaiting_ai_since = None
+                    self._nudge_count = 0
+                    self._caller_voice_active = True
+                    self._last_caller_loud_at = time.monotonic()
                     await self._barge_in()
                 elif isinstance(ev, TurnComplete):
                     self._ai_speaking = False
+                    self._awaiting_ai_since = None
+                    self._nudge_count = 0
                     self._touch()
                     if self.telephony == "exotel":
                         await self._flush_exotel()
                     if self._user_spoke_this_cycle:
                         self._caller_turns_since_reset += 1
                         self._user_spoke_this_cycle = False
+                        self._sync_continuity_digest(force=True)
                     if self._farewell_pending:
                         await self._maybe_finish_after_farewell()
                     else:
@@ -382,8 +426,6 @@ class CallBridge:
                                 asyncio.create_task(
                                     self._on_caller_farewell(ev.text), name="farewell"
                                 )
-                            if not self._ai_speaking and not self._farewell_pending:
-                                self._awaiting_ai_since = time.monotonic()
                         elif ev.role == "assistant":
                             self._awaiting_ai_since = None
                 elif isinstance(ev, ToolCall):
