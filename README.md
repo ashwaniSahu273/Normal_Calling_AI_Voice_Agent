@@ -1,139 +1,57 @@
-# AI Voice Receptionist - Core Bridge
+# AI Voice Receptionist — Core Bridge
 
-Small Python switchboard: phone call audio (Exotel or Plivo) <-> AI (Gemini Live or OpenAI Realtime) <-> n8n tools.
-No database, no auth UI.
-
-## Providers (swappable)
-
-| Layer | Options | Default now |
-|-------|---------|-------------|
-| AI | `gemini` (free) / `openai` (paid) | `gemini` |
-| Telephony | `exotel` / `plivo` | `exotel` |
-
-Set in `.env`:
+Phone audio (Plivo or Exotel) ↔ Gemini Live (or OpenAI Realtime) ↔ n8n business actions.
 
 ```
-AI_PROVIDER=gemini
-TELEPHONY_PROVIDER=exotel
+Caller → Plivo/Exotel → WebSocket → AI → tools → n8n → Sheets / WhatsApp
 ```
 
-When Plivo compliance is approved later, flip `TELEPHONY_PROVIDER=plivo` and point Plivo Answer URL at `/plivo/answer`. No other code change.
+## Documentation
 
-## Flow
+| Doc | For |
+|-----|-----|
+| **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, Plivo/Exotel, voice, n8n, Sheets, troubleshooting |
+| **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | ResilioHub Node backend, multi-tenant, product rollout |
+| `docs/Voice_Agent_Complete_Flow_Guide.pdf` | Visual architecture (regenerate: `python scripts/generate_flow_pdf.py`) |
 
+## Quick start
+
+```bash
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
 ```
-Caller -> Exotel/Plivo -> WebSocket /exotel/stream or /plivo/stream
-      <-> Gemini/OpenAI (audio)
-      Tool call -> n8n webhook -> AI speaks result
-```
+
+Dev tunnel: `cloudflared tunnel --url http://localhost:5000` → set `PUBLIC_HOST` in `.env`.
+
+## Providers (`.env`)
+
+| Layer | Options | SaaS default |
+|-------|---------|--------------|
+| AI | `gemini` / `openai` | `gemini` |
+| Telephony | `plivo` / `exotel` | `plivo` (global) |
+
+Flip `TELEPHONY_PROVIDER` and restart — no code change.
 
 ## Project layout
 
 ```
-app.py              # FastAPI entry (run: python app.py)
-bridge.py           # Call relay, hang-up, n8n post-call
-config.py           # Environment config
-audio.py            # PCM / mu-law, resampling, Exotel frames
-knowledge.py        # Business context + system prompt + local RAG
-call_digest.py      # Transcript merge, call summaries for Sheets
-tools.py            # AI tools → n8n webhooks
-provider_base.py    # AI provider interface
-provider_gemini.py  # Gemini Live
-provider_openai.py  # OpenAI Realtime
-plivo_xml.py        # Plivo answer XML
+app.py, bridge.py, config.py, audio.py
+knowledge.py, call_digest.py, tools.py
+provider_gemini.py, provider_openai.py, plivo_xml.py
 
-data/
-  business_knowledge.md   # Company FAQ for the agent (edit this)
-
-n8n/
-  voice_agent_actions.json   # Import into n8n
-  build_call_log.js          # Source for Build Call Log node
-  *_headers.csv              # Google Sheet row-1 headers
-
-docs/                 # Guides and PDF flow doc
-scripts/              # PDF generator, n8n sync (optional)
+data/business_knowledge.md    # Company FAQ
+n8n/voice_agent_actions.json  # Import into n8n
+n8n/build_call_log.js         # Summary logic (sync via scripts/sync_n8n_workflow.py)
+docs/GUIDE.md                 # Operations
+docs/INTEGRATION.md           # Product / backend
+scripts/                      # n8n sync, PDF generator
 ```
-
-## Files (runtime)
-
-| File | Purpose |
-|------|---------|
-| `app.py` | HTTP + WebSocket routes for Exotel and Plivo |
-| `bridge.py` | Dual telephony relay + barge-in + n8n tools |
-| `provider_*.py` | Gemini / OpenAI backends |
-| `audio.py` | PCM/mu-law, resampling, Exotel frame buffer |
-| `n8n/voice_agent_actions.json` | Importable n8n workflow |
-
-See **[docs/VOICE_AND_PERSONA.md](docs/VOICE_AND_PERSONA.md)** for voice names, LLM options, and persona tuning.
-
-## Phase 1 (stability + RAG + Sheets)
-
-See **[docs/PHASE1_SETUP_GUIDE.md](docs/PHASE1_SETUP_GUIDE.md)** for Google Sheet tabs, n8n import, env vars, and tests.
-
-## Setup
-
-```bash
-python -m venv .venv
-.venv\Scripts\Activate.ps1   # Windows
-pip install -r requirements.txt
-cp .env.example .env         # fill keys + PUBLIC_HOST + N8N_WEBHOOK_URL
-python app.py
-```
-
-Tunnel (keep running):
-
-```bash
-cloudflared tunnel --url http://localhost:5000
-```
-
-Put tunnel host (no `https://`) into `PUBLIC_HOST`. Health check:
-
-`https://<PUBLIC_HOST>/health` -> `{"status":"ok","ai":"gemini","telephony":"exotel"}`
-
----
-
-## Exotel setup (primary)
-
-**Production numbers, inbound/outbound APIs, and doc links:** [docs/TELEPHONY_NUMBERS.md](docs/TELEPHONY_NUMBERS.md).
-
-Exotel India often still needs KYC before a live number works — check your dashboard. If you already have an Exotel account + number, use **Voicebot** (bidirectional), not Stream (one-way).
-
-1. App Bazaar → create / edit **Custom App** call flow.
-2. Drop **Voicebot** applet.
-3. URL — either:
-   - **Static:** `wss://<PUBLIC_HOST>/exotel/stream?sample-rate=8000`
-   - **Dynamic:** `https://<PUBLIC_HOST>/exotel/ws-url` (returns `{"url":"wss://..."}`)
-4. Sample rate: match `.env` `EXOTEL_SAMPLE_RATE` (default `8000`).
-5. Save flow → attach to your Exotel virtual number.
-6. Call the number. Logs should show `connected`, `Stream start`, then AI greeting.
-
-### Exotel audio notes
-
-- Wire format: **raw PCM 16-bit little-endian** (not mu-law).
-- Outbound frames buffered to **~100ms (1600 bytes @ 8kHz PCM16)** per Exotel rules.
-- Barge-in uses Exotel `clear` event.
-
----
-
-## Plivo setup (fallback after compliance)
-
-1. Complete Plivo **Add Compliance** (CoI/Udyam + GST/PAN).
-2. Create XML Application → Answer URL:
-   `https://<PUBLIC_HOST>/plivo/answer`
-3. Assign number to that application.
-4. Set `.env` `TELEPHONY_PROVIDER=plivo`, restart `python app.py`.
-
----
 
 ## n8n
 
-Import `n8n/voice_agent_actions.json`, activate, paste production webhook URL into `N8N_WEBHOOK_URL`.
+Import `n8n/voice_agent_actions.json`, activate, set `N8N_WEBHOOK_URL` in `.env`.
 
-## Switch later
-
-| Goal | Change |
-|------|--------|
-| Use Plivo | `TELEPHONY_PROVIDER=plivo` + Plivo Answer URL |
-| Use OpenAI | `AI_PROVIDER=openai` + `OPENAI_API_KEY` |
-
-Honest caveat: Exotel AgentStream must be enabled on your account — if Voicebot applet is missing, ask Exotel support to enable streaming / AgentStream.
+Sheet headers: `n8n/*_headers.csv`.

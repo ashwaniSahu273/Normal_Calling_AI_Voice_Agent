@@ -15,22 +15,70 @@ function shorten(t, limit = 120) {
   return s.slice(0, limit - 1).trim() + '…';
 }
 
+const SPANISH_MARKERS = ['sí', 'si ', 'hasta que', 'problema', 'solucione', 'tengo', ' que se ', ' el ', ' la '];
+const ENTERTAINMENT_MARKERS = ['movie', 'film', 'devdas', 'song', 'video clip', 'trailer'];
+const BUSINESS_KEYWORDS = [
+  'app', 'website', 'web', 'software', 'development', 'marketing', 'digital', 'crm', 'whatsapp',
+  'resilio', 'price', 'pricing', 'cost', 'quote', 'demo', 'service', 'mobile', 'android', 'ios',
+  'design', 'appointment', 'book', 'lead', 'project',
+];
+const FAREWELL = /^(thanks|thank you|bye|goodbye|ok bye|theek hai|shukriya)/i;
+
+function hasDevanagari(text) {
+  return /[\u0900-\u097f]/.test(String(text || ''));
+}
+
+function isSttNoise(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  const low = t.toLowerCase();
+  if (SPANISH_MARKERS.filter((m) => low.includes(m)).length >= 2) return true;
+  if (ENTERTAINMENT_MARKERS.some((m) => low.includes(m))) return true;
+  if (/\b(movie|film)\b/.test(low) && !/(about|promo|marketing)/.test(low)) return true;
+  const words = low.split(/\s+/);
+  if (
+    words.length <= 2 &&
+    t.length < 16 &&
+    !BUSINESS_KEYWORDS.some((k) => low.includes(k)) &&
+    !/^[A-Za-z]{2,}(\s+[A-Za-z]{2,})?$/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function callerQuality(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t || FAREWELL.test(t) || isSttNoise(t)) return 0;
+  const low = t.toLowerCase();
+  let score = 0;
+  if (BUSINESS_KEYWORDS.some((k) => low.includes(k))) score += 4;
+  if (t.includes('?')) score += 2;
+  if (/\b(my name|mera naam|naam hai|i am|this is)\b/i.test(low)) score += 3;
+  const words = t.split(/\s+/);
+  if (words.length >= 3 && words.length <= 24) score += 2;
+  if (SPANISH_MARKERS.some((m) => low.includes(m))) score -= 3;
+  return score;
+}
+
+function meaningfulCaller(text) {
+  return callerQuality(text) >= 3;
+}
+
 function poorSummary(text) {
   const s = String(text || '').trim();
   if (!s || s.length > 420) return true;
   const low = s.toLowerCase();
-  if (low.includes('caller said:') || low.includes('agent explained:') || low.includes('agent covered:')) return true;
-  if (low.includes('key ask:') || low.includes('caller wanted:') || low.includes('agent shared:')) return true;
+  if (low.includes('caller said:') || low.includes('agent explained:')) return true;
   if (/caller:/i.test(s) || /agent:/i.test(s)) return true;
+  if (low.includes('they said they wanted') && (low.includes('hasta que') || low.includes('movie') || hasDevanagari(s))) {
+    return true;
+  }
+  if (low.includes('responded:') && hasDevanagari(s)) return true;
   if ((low.match(/they also asked/g) || []).length >= 2) return true;
-  if (/they (also )?asked about \w+\./i.test(low)) return true;
-  if (s.includes('|') && s.split('|').length >= 4) return true;
-  if (s.startsWith('[') && low.includes('turns]')) return true;
   if (s.split('\n').filter(Boolean).length > 1) return true;
   return false;
 }
-
-const FAREWELL = /^(thanks|thank you|bye|goodbye|ok bye|theek hai|shukriya)/i;
 
 function coalesceEntries(entries) {
   const out = [];
@@ -48,66 +96,6 @@ function coalesceEntries(entries) {
   return out;
 }
 
-function meaningfulCaller(text) {
-  const t = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!t || FAREWELL.test(t)) return false;
-  const words = t.split(/\s+/);
-  if (words.length >= 3) return true;
-  if (t.length >= 20) return true;
-  if (t.includes('?')) return true;
-  if (words.length === 1 && words[0].length < 10) return false;
-  if (t.length < 14) return false;
-  return true;
-}
-
-function inferTopic(topicArg, userBlob) {
-  const t = String(topicArg || '').trim();
-  if (t && !/^general enquir/i.test(t)) return t;
-  const b = userBlob.toLowerCase();
-  const checks = [
-    [['digital marketing', 'marketing', 'seo', 'social media'], 'Digital marketing'],
-    [['appointment', 'book a', 'booking', 'schedule'], 'Appointment booking'],
-    [['website', 'web design', 'web development'], 'Website / web development'],
-    [['mobile app', 'android', 'ios app'], 'Mobile app'],
-    [['crm', 'whatsapp crm'], 'CRM / WhatsApp CRM'],
-    [['hosting', 'domain'], 'Hosting'],
-    [['demo'], 'Product demo'],
-    [['price', 'pricing', 'cost', 'quote'], 'Pricing enquiry'],
-    [['callback', 'call back'], 'Callback request'],
-  ];
-  for (const [keys, label] of checks) {
-    if (keys.some((k) => b.includes(k))) return label;
-  }
-  return t || 'General enquiry';
-}
-
-function cleanupStt(text) {
-  let t = String(text || '').replace(/\s+/g, ' ').trim();
-  t = t.replace(/\bappoint\s+ment\b/gi, 'appointment');
-  t = t.replace(/\bdigi\s+tal\b/gi, 'digital');
-  t = t.replace(/\bmark\s+eting\b/gi, 'marketing');
-  return t;
-}
-
-function naturalRequest(text) {
-  let t = cleanupStt(text);
-  t = t.replace(
-    /^(hi|hello|hey|yes|yeah|ok|okay|namaste|i want to|i want|i need to|i need|please|can you|could you|tell me|mujhe|main|want to|want)\s+/i,
-    '',
-  ).trim();
-  if (!t) t = cleanupStt(text);
-  if (t.length > 1) t = t.charAt(0).toLowerCase() + t.slice(1);
-  return shorten(t, 160);
-}
-
-function embedAnswer(text) {
-  let t = shorten(text, 130).replace(/\.$/, '').trim();
-  if (!t) return 'responded briefly';
-  const low = t.charAt(0).toLowerCase() + t.slice(1);
-  if (/^(we |our |yes|no |the |i |haan|ji |sure)/i.test(low)) return `explained that ${low}`;
-  return `responded: ${low}`;
-}
-
 function parseConversation(conversationFull) {
   const lines = String(conversationFull || '')
     .split('\n')
@@ -120,57 +108,155 @@ function parseConversation(conversationFull) {
       return null;
     })
     .filter(Boolean);
-  return coalesceEntries(entries);
+  return entries;
+}
+
+function userLinesForSummary(entries) {
+  const lines = [];
+  const seen = new Set();
+  for (const e of entries) {
+    if (e.role !== 'user') continue;
+    const text = String(e.text || '').replace(/\s+/g, ' ').trim();
+    if (!text || isSttNoise(text)) continue;
+    const key = text.toLowerCase().slice(0, 100);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(text);
+  }
+  return lines;
+}
+
+function inferTopic(topicArg, userBlob) {
+  let t = String(topicArg || '').trim().replace(/\s+lead\s*$/i, '');
+  if (t && !/^general enquir/i.test(t)) return t;
+  const b = userBlob.toLowerCase();
+  const checks = [
+    [['digital marketing', 'marketing', 'seo'], 'Digital marketing'],
+    [['appointment', 'book a', 'booking'], 'Appointment booking'],
+    [['website', 'web design', 'web development'], 'Website / web development'],
+    [['mobile app', 'android', 'ios app', 'application'], 'Mobile app development'],
+    [['crm', 'whatsapp crm'], 'CRM / WhatsApp CRM'],
+    [['demo'], 'Product demo'],
+    [['price', 'pricing', 'cost', 'quote'], 'Pricing enquiry'],
+    [['callback', 'call back'], 'Callback request'],
+  ];
+  for (const [keys, label] of checks) {
+    if (keys.some((k) => b.includes(k))) return label;
+  }
+  return t || 'General enquiry';
+}
+
+function extractCallerName(entries) {
+  const blob = userLinesForSummary(entries).join(' ');
+  const patterns = [
+    /(?:my name is|i am|i'm|this is)\s+([A-Za-z][A-Za-z\s.'-]{2,40})/i,
+    /(?:mera naam|naam hai|mera name)\s+([A-Za-z][A-Za-z\s.'-]{2,40})/i,
+  ];
+  for (const pat of patterns) {
+    const m = blob.match(pat);
+    if (m && m[1] && !isSttNoise(m[1])) return m[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return '';
+}
+
+function intentPhrases(text) {
+  const low = String(text || '').toLowerCase();
+  const found = [];
+  const mapping = [
+    [['mobile app', 'android app', 'ios app'], 'mobile app development'],
+    [['website', 'web design', 'web development'], 'website development'],
+    [['software'], 'software development'],
+    [['digital marketing', 'marketing', 'seo'], 'digital marketing'],
+    [['whatsapp crm', 'crm'], 'WhatsApp CRM'],
+    [['resilio', 'resilience'], 'ResilioHub platform'],
+    [['price', 'pricing', 'cost', 'quote'], 'pricing'],
+    [['demo'], 'a product demo'],
+    [['callback', 'call back'], 'a callback'],
+  ];
+  for (const [keys, label] of mapping) {
+    if (keys.some((k) => low.includes(k)) && !found.includes(label)) found.push(label);
+  }
+  return found;
+}
+
+function collectCallerIntents(entries) {
+  const intents = [];
+  const seen = new Set();
+  for (const text of userLinesForSummary(entries)) {
+    if (!meaningfulCaller(text)) continue;
+    for (const phrase of intentPhrases(text)) {
+      const key = phrase.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        intents.push(phrase);
+      }
+    }
+  }
+  return intents;
+}
+
+function summarizeAgent(entries) {
+  const blocks = entries
+    .filter((e) => e.role === 'assistant' && String(e.text || '').length > 15 && !FAREWELL.test(e.text))
+    .map((e) => String(e.text));
+  if (!blocks.length) return '';
+  const combined = blocks.join(' ').toLowerCase();
+  const services = [];
+  if (/software|development|develop|सॉफ्ट/.test(combined)) services.push('software development');
+  if (/web|website|वेब|design/.test(combined)) services.push('web design');
+  if (/app|mobile|android|ios|ऐप/.test(combined)) services.push('mobile apps');
+  if (/marketing|digital|मार्केट/.test(combined)) services.push('digital marketing');
+  if (services.length) {
+    return `The AI receptionist explained that the company offers ${services.join(', ')} and asked what the caller needed.`;
+  }
+  if (/price|pricing|cost|quote|₹|rupee|कीमत/.test(combined)) {
+    return 'The AI receptionist shared pricing details with the caller.';
+  }
+  return 'The AI receptionist answered the caller\'s questions and offered to help further.';
 }
 
 function narrateCall(topic, conversationFull, nextStep, outcome, args) {
-  const coalesced = parseConversation(conversationFull);
-  const userBlob = coalesced
-    .filter((e) => e.role === 'user')
-    .map((e) => e.text)
-    .join(' ');
+  const entries = parseConversation(conversationFull);
+  const userBlob = userLinesForSummary(entries).join(' ');
   const topicLabel = inferTopic(topic, userBlob);
-  const topicPhrase = topicLabel !== 'General enquiry' ? topicLabel.toLowerCase() : 'their enquiry';
+  const topicPhrase = topicLabel !== 'General enquiry' ? topicLabel.toLowerCase() : 'a general enquiry';
+  const name = extractCallerName(entries);
+  const intents = collectCallerIntents(entries);
 
-  const userBlocks = coalesced.filter((e) => e.role === 'user' && meaningfulCaller(e.text)).map((e) => e.text);
-  const agentBlocks = coalesced.filter(
-    (e) => e.role === 'assistant' && e.text.length > 18 && !FAREWELL.test(e.text),
-  ).map((e) => e.text);
+  const sentences = [];
+  sentences.push(name ? `${name} called regarding ${topicPhrase}.` : `A caller contacted the company regarding ${topicPhrase}.`);
 
-  const sentences = [`The caller contacted the company regarding ${topicPhrase}.`];
-
-  if (userBlocks.length) {
-    const main = naturalRequest(userBlocks[0]);
-    if (userBlocks.length > 1) {
-      const extra = naturalRequest(userBlocks.slice(1, 3).join(' '));
-      if (extra && !main.includes(extra)) {
-        sentences.push(`They said they wanted ${main}, and also mentioned ${extra}.`);
-      } else sentences.push(`They said they wanted ${main}.`);
-    } else if (main.endsWith('?')) sentences.push(`They asked ${main}`);
-    else sentences.push(`They said they wanted ${main}.`);
+  const topicNorm = topicLabel.toLowerCase();
+  const deduped = intents.filter((i) => !topicNorm.includes(i.toLowerCase()) && !i.toLowerCase().includes(topicNorm));
+  const use = deduped.length ? deduped : intents.slice(0, 1);
+  if (use.length === 1 && !topicNorm.includes(use[0].toLowerCase())) {
+    sentences.push(`They enquired about ${use[0]}.`);
+  } else if (use.length > 1) {
+    sentences.push(`They enquired about ${use[0]} and also asked about ${use[1]}.`);
+  } else if (topicLabel !== 'General enquiry') {
+    sentences.push(`The main topic of the call was ${topicPhrase}.`);
   } else {
-    sentences.push('The conversation was very short and few details were captured.');
+    sentences.push('Few clear details were captured from the caller\'s speech.');
   }
 
-  if (agentBlocks.length) {
-    let best = agentBlocks[agentBlocks.length - 1];
-    for (const line of agentBlocks) if (line.length > best.length) best = line;
-    sentences.push(`The receptionist ${embedAnswer(best)}.`);
-  }
+  const agentLine = summarizeAgent(entries);
+  if (agentLine) sentences.push(agentLine);
 
   if (args.appointment_booked === true || args.appointment_booked === 'yes') {
     sentences.push('An appointment was booked during the call.');
   } else if (args.lead_captured === true || args.lead_captured === 'yes') {
-    sentences.push("The agent captured the caller's details for a follow-up call.");
+    sentences.push('The caller\'s details were captured as a sales lead for follow-up.');
   } else if (nextStep && nextStep !== 'None') {
-    sentences.push(`Next step for the team: ${String(nextStep).toLowerCase()}.`);
+    sentences.push(`Recommended next step: ${String(nextStep).toLowerCase()}.`);
   }
 
   const oc = String(outcome || '').toLowerCase();
   if (oc && !oc.includes('hangup')) {
     if (oc.includes('thanks') || oc.includes('goodbye')) sentences.push('The caller ended the conversation politely.');
     else if (oc.includes('silence')) sentences.push('The call ended after a period of silence.');
-    else if (oc.includes('hung up')) sentences.push('The caller hung up before finishing the discussion.');
+    else if (oc.includes('completed') || oc.includes('request completed')) {
+      sentences.push('The call ended after the caller\'s request was handled.');
+    } else if (oc.includes('hung up')) sentences.push('The caller hung up before finishing the discussion.');
     else sentences.push(`The call ended (${oc}).`);
   }
 
@@ -210,7 +296,7 @@ const waText = [
   `📞 *${business} — Call*`,
   `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,
   `Caller: ${from || 'unknown'}`,
-  `Topic: ${topic}`,
+  `Topic: ${inferTopic(topic, conversationFull.toLowerCase())}`,
   `Next: ${nextStep}`,
   '',
   summary,
@@ -236,7 +322,7 @@ return [
       time: timeIst,
       caller: from,
       duration,
-      topic,
+      topic: inferTopic(topic, conversationFull.toLowerCase()),
       summary,
       next_step: nextStep,
       turns,

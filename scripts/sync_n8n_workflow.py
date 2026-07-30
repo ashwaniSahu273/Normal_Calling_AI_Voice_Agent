@@ -26,7 +26,7 @@ def main() -> None:
     if not updated:
         raise SystemExit(f"Node {NODE_NAME!r} not found in workflow")
     WORKFLOW.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"Updated {WORKFLOW.name} ← {JS.name}")
+    print(f"Updated {WORKFLOW.name} <- {JS.name}")
 
 
 if __name__ == "__main__":

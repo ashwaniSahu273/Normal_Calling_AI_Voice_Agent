@@ -128,32 +128,149 @@ def coalesce_role_runs(transcript: list[dict[str, str]]) -> list[dict[str, str]]
     return out
 
 
-def _is_meaningful_caller_text(text: str) -> bool:
+_SPANISH_MARKERS = (
+    "sí",
+    "si ",
+    "hasta que",
+    "problema",
+    "solucione",
+    "solucionar",
+    "tengo",
+    " que se ",
+    " el ",
+    " la ",
+    " los ",
+    " las ",
+    " por favor",
+    "gracias",
+)
+
+_ENTERTAINMENT_MARKERS = (
+    "movie",
+    "film",
+    "devdas",
+    "song",
+    "video clip",
+    "trailer",
+    "netflix",
+)
+
+_BUSINESS_KEYWORDS = (
+    "app",
+    "application",
+    "website",
+    "web",
+    "software",
+    "development",
+    "develop",
+    "marketing",
+    "digital",
+    "crm",
+    "whatsapp",
+    "resilio",
+    "resilience",
+    "price",
+    "pricing",
+    "cost",
+    "quote",
+    "demo",
+    "service",
+    "company",
+    "business",
+    "mobile",
+    "android",
+    "ios",
+    "design",
+    "hosting",
+    "domain",
+    "appointment",
+    "book",
+    "lead",
+    "project",
+    "सॉफ्ट",
+    "वेब",
+    "ऐप",
+    "मार्केट",
+    "डेवल",
+    "कीमत",
+    "demo",
+    "सेवा",
+)
+
+
+def _has_devanagari(text: str) -> bool:
+    return any("\u0900" <= c <= "\u097f" for c in (text or ""))
+
+
+def _is_stt_noise(text: str) -> bool:
+    """Drop hallucinated / wrong-language / junk STT shards."""
     t = " ".join((text or "").split()).strip()
-    if not t or user_wants_to_end(t):
-        return False
-    words = t.split()
-    if len(words) >= 3:
+    if not t:
         return True
-    if len(t) >= 20:
+    low = t.lower()
+    if sum(1 for m in _SPANISH_MARKERS if m in low) >= 2:
         return True
+    if any(m in low for m in _ENTERTAINMENT_MARKERS):
+        return True
+    if re.search(r"\b(movie|film)\b", low) and not any(
+        k in low for k in ("about", "promo", "marketing", "video marketing")
+    ):
+        return True
+    # Very short unrelated shards (not person names)
+    words = low.split()
+    if (
+        len(words) <= 2
+        and len(t) < 16
+        and not any(k in low for k in _BUSINESS_KEYWORDS)
+        and not re.match(r"^[A-Za-z]{2,}(?:\s+[A-Za-z]{2,})?$", t)
+    ):
+        return True
+    # Mostly punctuation / symbols
+    alpha = sum(1 for c in t if c.isalnum() or c.isspace() or "\u0900" <= c <= "\u097f")
+    if alpha < len(t) * 0.55:
+        return True
+    return False
+
+
+def _caller_text_quality(text: str) -> int:
+    """Higher = more likely real caller intent (not STT noise)."""
+    t = " ".join((text or "").split()).strip()
+    if not t or user_wants_to_end(t) or _is_stt_noise(t):
+        return 0
+    low = t.lower()
+    score = 0
+    if any(k in low for k in _BUSINESS_KEYWORDS):
+        score += 4
     if "?" in t:
-        return True
-    if len(words) == 1 and len(words[0]) < 10:
-        return False
-    if len(t) < 14:
-        return False
-    return True
+        score += 2
+    if re.search(r"\b(my name|mera naam|naam hai|i am|this is)\b", low):
+        score += 3
+    words = t.split()
+    if 3 <= len(words) <= 24:
+        score += 2
+    elif len(words) > 24:
+        score -= 1
+    if _has_devanagari(t) and any(k in t for k in ("चाहिए", "जान", "बत", "कीमत", "सेवा")):
+        score += 2
+    if sum(1 for m in _SPANISH_MARKERS if m in low) >= 1:
+        score -= 3
+    return score
+
+
+def _is_meaningful_caller_text(text: str) -> bool:
+    return _caller_text_quality(text) >= 3
 
 
 def infer_topic_label(
     transcript: list[dict[str, str]], caller_intent: str = ""
 ) -> str:
-    if (caller_intent or "").strip() and caller_intent.strip().lower() not in (
+    intent = (caller_intent or "").strip()
+    intent = re.sub(r"\s+lead\s*$", "", intent, flags=re.I).strip()
+    if intent and intent.lower() not in (
         "general enquiry",
         "general inquiry",
     ):
-        return caller_intent.strip()
+        return intent
     blob = " ".join(
         (e.get("text") or "")
         for e in coalesce_role_runs(transcript)
@@ -174,6 +291,122 @@ def infer_topic_label(
         if any(k in blob for k in keys):
             return label
     return caller_intent.strip() or "General enquiry"
+
+
+def _user_lines_for_summary(transcript: list[dict[str, str]]) -> list[str]:
+    """Per-turn caller lines — avoid merging junk STT into one blob."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for entry in transcript:
+        if entry.get("role") != "user":
+            continue
+        text = " ".join((entry.get("text") or "").split()).strip()
+        if not text or _is_stt_noise(text):
+            continue
+        key = text.lower()[:100]
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(text)
+    return lines
+
+
+def _extract_caller_name(transcript: list[dict[str, str]]) -> str:
+    """Best-effort roman name for owner summary."""
+    blob = " ".join(_user_lines_for_summary(transcript))
+    if not blob:
+        blob = " ".join(
+            (e.get("text") or "")
+            for e in transcript
+            if e.get("role") == "user"
+        )
+    patterns = (
+        r"(?:my name is|i am|i'?m|this is)\s+([A-Za-z][A-Za-z\s.'-]{2,40})",
+        r"(?:mera naam|naam hai|mera name)\s+([A-Za-z][A-Za-z\s.'-]{2,40})",
+        r"(?:mera naam|naam hai)\s+([\u0900-\u097f\s]{2,30})",
+    )
+    for pat in patterns:
+        m = re.search(pat, blob, flags=re.I)
+        if not m:
+            continue
+        name = " ".join(m.group(1).split()).strip(" .,")
+        if len(name) >= 3 and not _is_stt_noise(name):
+            # Prefer Latin script for sheet readability
+            if re.search(r"[A-Za-z]", name):
+                return name.title()
+            # Common STT fix for Hindi names in summary — keep short
+            return name
+    return ""
+
+
+def _intent_phrases_from_text(text: str) -> list[str]:
+    """Short English intent labels from one utterance."""
+    low = _cleanup_stt(text).lower()
+    found: list[str] = []
+    mapping = (
+        (("mobile app", "android app", "ios app", "application"), "mobile app development"),
+        (("website", "web design", "web development"), "website development"),
+        (("software", "custom app"), "software development"),
+        (("digital marketing", "marketing", "seo", "social media"), "digital marketing"),
+        (("whatsapp crm", "crm"), "WhatsApp CRM"),
+        (("resilio", "resilience"), "ResilioHub platform"),
+        (("price", "pricing", "cost", "quote", "package"), "pricing"),
+        (("demo", "demonstration"), "a product demo"),
+        (("callback", "call back", "call me"), "a callback"),
+        (("appointment", "book", "schedule"), "booking an appointment"),
+    )
+    for keys, label in mapping:
+        if any(k in low for k in keys) and label not in found:
+            found.append(label)
+    return found
+
+
+def _collect_caller_intents(transcript: list[dict[str, str]]) -> list[str]:
+    intents: list[str] = []
+    seen: set[str] = set()
+    for text in _user_lines_for_summary(transcript):
+        if not _is_meaningful_caller_text(text):
+            continue
+        for phrase in _intent_phrases_from_text(text):
+            key = phrase.lower()
+            if key not in seen:
+                seen.add(key)
+                intents.append(phrase)
+    return intents
+
+
+def _summarize_agent_response(transcript: list[dict[str, str]]) -> str:
+    """One English sentence — never paste raw Hindi/Spanish STT."""
+    blocks = [
+        (e.get("text") or "").strip()
+        for e in coalesce_role_runs(transcript)
+        if e.get("role") == "assistant"
+        and len((e.get("text") or "").strip()) > 15
+        and not user_wants_to_end(e.get("text") or "")
+    ]
+    if not blocks:
+        return ""
+    combined = " ".join(blocks).lower()
+    services = []
+    if any(k in combined for k in ("software", "सॉफ्ट", "development", "develop")):
+        services.append("software development")
+    if any(k in combined for k in ("web", "website", "वेब", "design")):
+        services.append("web design")
+    if any(k in combined for k in ("app", "mobile", "android", "ios", "ऐप")):
+        services.append("mobile apps")
+    if any(k in combined for k in ("marketing", "digital", "मार्केट")):
+        services.append("digital marketing")
+    if services:
+        svc = ", ".join(services[:4])
+        return (
+            f"The AI receptionist explained that the company offers {svc} "
+            "and asked what the caller needed."
+        )
+    if any(k in combined for k in ("price", "pricing", "cost", "quote", "₹", "rupee", "कीमत")):
+        return "The AI receptionist shared pricing details with the caller."
+    if any(k in combined for k in ("demo", "trial", "plan")):
+        return "The AI receptionist described product plans and next steps."
+    return "The AI receptionist answered the caller's questions and offered to help further."
 
 
 def _cleanup_stt(text: str) -> str:
@@ -387,6 +620,12 @@ def is_poor_summary(text: str) -> bool:
         return True
     if re.search(r"they (also )?asked about \w+\.", low):
         return True
+    if "they said they wanted" in low and (
+        "sí" in low or "hasta que" in low or "movie" in low or _has_devanagari(text)
+    ):
+        return True
+    if "responded:" in low and _has_devanagari(text):
+        return True
     return False
 
 
@@ -438,61 +677,43 @@ def narrate_call_in_english(
     lead_captured: bool = False,
     outcome: str = "",
 ) -> str:
-    """Short third-person story of the call — no STT word shards."""
+    """Short third-person owner summary — facts only, no raw STT quotes."""
     topic = infer_topic_label(transcript, caller_intent)
-    topic_phrase = topic.lower() if topic != "General enquiry" else "their enquiry"
-    exchanges = _collect_exchanges(transcript)
-    coalesced = coalesce_role_runs(transcript)
+    topic_phrase = topic.lower() if topic != "General enquiry" else "a general enquiry"
+    name = _extract_caller_name(transcript)
+    intents = _collect_caller_intents(transcript)
 
-    user_blocks = [
-        e["text"]
-        for e in coalesced
-        if e.get("role") == "user" and _is_meaningful_caller_text(e["text"])
-    ]
-    agent_blocks = [
-        e["text"]
-        for e in coalesced
-        if e.get("role") == "assistant"
-        and len((e.get("text") or "").strip()) > 18
-        and not user_wants_to_end(e.get("text") or "")
-    ]
-
-    sentences: list[str] = [
-        f"The caller contacted the company regarding {topic_phrase}."
-    ]
-
-    if user_blocks:
-        main = _natural_request(user_blocks[0])
-        if len(user_blocks) > 1:
-            extra = _natural_request(" ".join(user_blocks[1:3]))
-            if extra and extra not in main:
-                sentences.append(
-                    f"They said they wanted {main}, and also mentioned {extra}."
-                )
-            else:
-                sentences.append(f"They said they wanted {main}.")
-        else:
-            if main.endswith("?"):
-                sentences.append(f"They asked {main}")
-            else:
-                sentences.append(f"They said they wanted {main}.")
-    elif exchanges:
-        q = _natural_request(exchanges[0][0])
-        sentences.append(
-            f"They asked {q}." if q.endswith("?") else f"They said they wanted {q}."
-        )
+    if name:
+        sentences: list[str] = [
+            f"{name} called regarding {topic_phrase}."
+        ]
     else:
-        sentences.append("The conversation was very short and few details were captured.")
+        sentences = [f"A caller contacted the company regarding {topic_phrase}."]
 
-    if agent_blocks:
-        best = agent_blocks[-1]
-        for line in reversed(agent_blocks):
-            if len(line) > len(best):
-                best = line
-                break
-        sentences.append(f"The receptionist {_embed_answer(best)}.")
-    elif exchanges and exchanges[-1][1]:
-        sentences.append(f"The receptionist {_embed_answer(exchanges[-1][1])}.")
+    if intents:
+        topic_norm = re.sub(r"\s+", " ", topic.lower())
+        deduped = [
+            i
+            for i in intents
+            if i.lower() not in topic_norm and topic_norm not in i.lower()
+        ]
+        use = deduped if deduped else intents[:1]
+        if len(use) == 1 and use[0].lower() in topic_norm:
+            pass  # topic line already covers it
+        elif len(use) == 1:
+            sentences.append(f"They enquired about {use[0]}.")
+        else:
+            sentences.append(
+                f"They enquired about {use[0]} and also asked about {use[1]}."
+            )
+    elif topic != "General enquiry":
+        sentences.append(f"The main topic of the call was {topic_phrase}.")
+    else:
+        sentences.append("Few clear details were captured from the caller's speech.")
+
+    agent_line = _summarize_agent_response(transcript)
+    if agent_line:
+        sentences.append(agent_line)
 
     next_l = sheet_next_step_label(
         follow_up,
@@ -502,9 +723,9 @@ def narrate_call_in_english(
     if appointment_booked:
         sentences.append("An appointment was booked during the call.")
     elif lead_captured:
-        sentences.append("The agent captured the caller's details for a follow-up call.")
+        sentences.append("The caller's details were captured as a sales lead for follow-up.")
     elif next_l and next_l not in ("None", ""):
-        sentences.append(f"Next step for the team: {next_l.lower()}.")
+        sentences.append(f"Recommended next step: {next_l.lower()}.")
 
     oc = (outcome or "").strip()
     if oc and "hangup" not in oc.lower():
@@ -514,10 +735,13 @@ def narrate_call_in_english(
             sentences.append("The call ended after a period of silence.")
         elif "max" in oc.lower():
             sentences.append("The call ended when the maximum call duration was reached.")
+        elif "completed" in oc.lower() or "request completed" in oc.lower():
+            sentences.append("The call ended after the caller's request was handled.")
         elif "hung up" in oc.lower():
             sentences.append("The caller hung up before finishing the discussion.")
         else:
-            sentences.append(f"The call ended ({oc.lower()}).")
+            clean = oc.lower().replace("caller ", "").strip()
+            sentences.append(f"The call ended ({clean}).")
 
     return " ".join(sentences)[:480].strip()
 

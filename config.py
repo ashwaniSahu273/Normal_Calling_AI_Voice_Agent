@@ -22,7 +22,7 @@ OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime").strip
 # Female clear voices (Gemini): Erinome (Clear), Kore (Firm), Aoede (Breezy), Achernar (Soft)
 VOICE = os.getenv("VOICE", "Erinome").strip()
 
-# Persona (spoken style — see docs/VOICE_AND_PERSONA.md)
+# Persona (spoken style — see docs/GUIDE.md)
 AGENT_NAME = os.getenv("AGENT_NAME", "").strip()
 VOICE_PERSONA = os.getenv("VOICE_PERSONA", "").strip()
 
