@@ -73,6 +73,8 @@ Restart `python app.py` after any `.env` change.
 
 ## 3. Telephony — Plivo (recommended)
 
+**Full step-by-step (KYC → number → first call):** **[PLIVO_SETUP.md](PLIVO_SETUP.md)**
+
 Best for **global** numbers and ResilioHub SaaS. Docs: [Plivo Voice](https://www.plivo.com/docs/voice/quickstart/quickstart).
 
 ### Production checklist

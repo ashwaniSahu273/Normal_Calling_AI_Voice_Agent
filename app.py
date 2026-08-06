@@ -5,6 +5,7 @@ import logging
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 from bridge import run_bridge
@@ -16,6 +17,22 @@ logging.basicConfig(
 )
 
 app = FastAPI(title="AI Voice Receptionist Bridge")
+log = logging.getLogger("voice-agent.app")
+
+
+class _StripPathWhitespaceMiddleware(BaseHTTPMiddleware):
+    """Plivo Answer URL pasted with trailing space → /plivo/answer%20 → 404 busy tone."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.scope.get("path", "")
+        stripped = path.rstrip()
+        if stripped != path:
+            log.warning("Trimmed trailing whitespace from URL path %r", path)
+            request.scope["path"] = stripped
+        return await call_next(request)
+
+
+app.add_middleware(_StripPathWhitespaceMiddleware)
 
 
 @app.on_event("startup")
@@ -51,6 +68,17 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
     """Plivo Answer URL -> Stream XML pointing at /plivo/stream."""
     if not config.PUBLIC_HOST:
         return PlainTextResponse("PUBLIC_HOST is not configured", status_code=500)
+    try:
+        if request.method == "POST":
+            form = await request.form()
+            log.info(
+                "Plivo answer call_uuid=%s from=%s to=%s",
+                form.get("CallUUID") or form.get("call_uuid"),
+                form.get("From") or form.get("from"),
+                form.get("To") or form.get("to"),
+            )
+    except Exception:  # noqa: BLE001
+        pass
     return PlainTextResponse(answer_xml(), media_type="application/xml")
 
 

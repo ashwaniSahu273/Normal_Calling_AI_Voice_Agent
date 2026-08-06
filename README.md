@@ -10,7 +10,8 @@ Caller → Plivo/Exotel → WebSocket → AI → tools → n8n → Sheets / What
 
 | Doc | For |
 |-----|-----|
-| **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, Plivo/Exotel, voice, n8n, Sheets, troubleshooting |
+| **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | **Plivo step-by-step** (KYC done → number → first call) |
+| **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, voice, n8n, Sheets, troubleshooting |
 | **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | ResilioHub Node backend, multi-tenant, product rollout |
 | `docs/Voice_Agent_Complete_Flow_Guide.pdf` | Visual architecture (regenerate: `python scripts/generate_flow_pdf.py`) |
 
