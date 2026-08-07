@@ -1,7 +1,8 @@
 # ResilioHub — Product Integration & Multi-Tenant Guide
 
 For **running the voice bridge** (env, Plivo, n8n, Sheets) see **[GUIDE.md](GUIDE.md)**.  
-For **architecture diagrams** (URLs, files, inbound/outbound/transfer) see **[FLOW.md](FLOW.md)**.
+For **architecture diagrams** (URLs, files, inbound/outbound/transfer) see **[FLOW.md](FLOW.md)**.  
+For **product decision research** (Plivo reseller, KYC, numbers, sales email) see **[PRODUCT_MULTI_TENANT.md](PRODUCT_MULTI_TENANT.md)**.
 
 This document covers:
 

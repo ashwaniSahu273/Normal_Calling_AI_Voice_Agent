@@ -11,6 +11,7 @@ Caller → Plivo/Exotel → WebSocket → AI → tools → n8n → Sheets / What
 | Doc | For |
 |-----|-----|
 | **[docs/FLOW.md](docs/FLOW.md)** | **How it works** — diagrams, why only `/plivo/answer` in console, all URLs + files |
+| **[docs/PRODUCT_MULTI_TENANT.md](docs/PRODUCT_MULTI_TENANT.md)** | **WhatsAppCRM feature** — Plivo reseller, KYC, numbers, is it possible? |
 | **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | Plivo step-by-step (KYC → number → first call) |
 | **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, voice, n8n, Sheets, troubleshooting |
 | **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | ResilioHub Node backend, multi-tenant, product rollout |
@@ -55,7 +56,8 @@ audio.py            # Codecs
 
 data/business_knowledge.md
 n8n/voice_agent_actions.json
-docs/FLOW.md        # Architecture (start here)
+docs/FLOW.md                 # Architecture (start here)
+docs/PRODUCT_MULTI_TENANT.md # Sell as WhatsAppCRM feature
 docs/PLIVO_SETUP.md
 docs/GUIDE.md
 docs/INTEGRATION.md

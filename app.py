@@ -245,20 +245,65 @@ async def plivo_stream_status(request: Request) -> PlainTextResponse:
     return PlainTextResponse("ok")
 
 
+async def _outbound_body(request: Request) -> dict:
+    """Parse outbound payload from JSON, form, or query (Postman / curl friendly)."""
+    import json as _json
+
+    ctype = (request.headers.get("content-type") or "").lower()
+    data: dict = {}
+
+    # Prefer JSON when Content-Type says so (or empty / unknown).
+    if "application/json" in ctype or not ctype or "text/plain" in ctype:
+        try:
+            raw = await request.json()
+        except Exception:  # noqa: BLE001
+            raw = None
+        if isinstance(raw, dict):
+            data = raw
+        elif isinstance(raw, str):
+            # Double-encoded JSON string body: "{\"to\":\"+91...\"}"
+            try:
+                parsed = _json.loads(raw)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except Exception:  # noqa: BLE001
+                pass
+
+    if not data and ("form" in ctype or "urlencoded" in ctype or "multipart" in ctype):
+        try:
+            form = await request.form()
+            data = {k: str(v) for k, v in form.items()}
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Query params as last resort (easy curl tests).
+    if not data.get("to"):
+        q = request.query_params
+        if q.get("to"):
+            data = {
+                "to": q.get("to") or data.get("to", ""),
+                "purpose": q.get("purpose") or data.get("purpose", ""),
+            }
+    return data
+
+
 @app.post("/plivo/outbound")
 async def plivo_outbound(request: Request) -> JSONResponse:
     """Start outbound call — AI calls the customer. Requires x-voice-secret header."""
     if not _check_outbound_secret(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    try:
-        body = await request.json()
-    except Exception:  # noqa: BLE001
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
+    body = await _outbound_body(request)
     to = str(body.get("to") or "").strip()
     purpose = str(body.get("purpose") or "").strip()
     if not to:
-        return JSONResponse({"error": "to is required (E.164)"}, status_code=400)
+        return JSONResponse(
+            {
+                "error": "to is required (E.164)",
+                "hint": 'Send JSON: {"to":"+91XXXXXXXXXX","purpose":"..."} with Content-Type: application/json',
+            },
+            status_code=400,
+        )
 
     try:
         from plivo_client import configured, create_outbound_call
