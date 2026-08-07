@@ -67,16 +67,26 @@ async def _plivo_form_value_async(request: Request, *keys: str) -> str:
     for key in keys:
         val = request.query_params.get(key)
         if val:
-            return str(val)
+            return str(val).strip()
     try:
         form = await request.form()
         for key in keys:
             val = form.get(key)
-            if val:
-                return str(val)
+            if val is not None and str(val).strip():
+                return str(val).strip()
     except Exception:  # noqa: BLE001
         pass
     return ""
+
+
+async def _plivo_caller_from_request(request: Request, *, direction: str) -> str:
+    """Customer phone: inbound=From, outbound=To (callee)."""
+    frm = await _plivo_form_value_async(request, "From", "from", "Caller", "caller")
+    to = await _plivo_form_value_async(request, "To", "to", "Called", "called")
+    direction = (direction or "inbound").strip().lower()
+    if direction == "outbound":
+        return to or frm
+    return frm or to
 
 
 def _check_outbound_secret(request: Request) -> bool:
@@ -109,21 +119,43 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
         call_uuid = await _plivo_form_value_async(
             request, "CallUUID", "call_uuid", "Uuid", "uuid"
         )
-        caller_from = await _plivo_form_value_async(request, "From", "from")
+        caller_from = await _plivo_caller_from_request(request, direction=direction)
         caller_to = await _plivo_form_value_async(request, "To", "to")
-        if direction == "outbound" and caller_to:
-            caller_from = caller_to
+        raw_from = await _plivo_form_value_async(request, "From", "from")
+        # Outbound ctx always has callee — prefer when Answer form misses To
+        if not caller_from and ctx:
+            from outbound_ctx import get as get_outbound_ctx
+
+            row = get_outbound_ctx(ctx)
+            if row and row.get("to"):
+                caller_from = str(row["to"]).strip()
+        if call_uuid and (caller_from or raw_from or caller_to):
+            from call_meta import remember
+
+            remember(
+                call_uuid=call_uuid,
+                caller=caller_from or raw_from,
+                to=caller_to,
+                direction=direction,
+            )
         if call_uuid or caller_from:
             log.info(
-                "Plivo answer call_uuid=%s from=%s to=%s mode=%s direction=%s",
+                "Plivo answer call_uuid=%s from=%s to=%s mode=%s direction=%s ctx=%s",
                 call_uuid,
-                caller_from,
-                caller_to,
+                caller_from or "-",
+                caller_to or "-",
                 mode or "-",
                 direction,
+                ctx or "-",
+            )
+        elif not caller_from:
+            log.warning(
+                "Plivo answer missing caller number direction=%s mode=%s",
+                direction,
+                mode or "-",
             )
     except Exception:  # noqa: BLE001
-        pass
+        log.exception("Plivo answer param parse failed")
 
     if mode == "ai" or direction == "outbound":
         return PlainTextResponse(
@@ -181,12 +213,33 @@ async def plivo_stream_status(request: Request) -> PlainTextResponse:
     err = await _plivo_form_value_async(request, "Error", "error")
     call_uuid = await _plivo_form_value_async(request, "CallUUID", "call_uuid")
     stream_id = await _plivo_form_value_async(request, "StreamID", "StreamId", "stream_id")
+    frm = await _plivo_form_value_async(request, "From", "from")
+    to = await _plivo_form_value_async(request, "To", "to")
+    direction = (
+        await _plivo_form_value_async(request, "Direction", "direction") or "inbound"
+    ).strip().lower()
+    # Stream-status includes From/To — primary source when WS start has no caller
+    if call_uuid or stream_id:
+        from call_meta import remember
+
+        remote = to if direction == "outbound" else frm
+        if not remote:
+            remote = frm or to
+        remember(
+            call_uuid=call_uuid,
+            stream_id=stream_id,
+            caller=remote,
+            to=to,
+            direction=direction,
+        )
     if event:
         log.info(
-            "Plivo stream-status event=%s call_uuid=%s stream_id=%s error=%s",
+            "Plivo stream-status event=%s call_uuid=%s stream_id=%s from=%s to=%s error=%s",
             event,
             call_uuid,
             stream_id,
+            frm or "-",
+            to or "-",
             err or "-",
         )
     return PlainTextResponse("ok")
@@ -244,6 +297,14 @@ async def plivo_stream(ws: WebSocket) -> None:
         row = get_outbound_ctx(ctx)
         if row:
             purpose = row.get("purpose") or None
+            if not caller and row.get("to"):
+                caller = str(row["to"]).strip() or None
+    log.info(
+        "Plivo stream connect direction=%s caller=%s ctx=%s",
+        direction,
+        caller or "-",
+        ctx or "-",
+    )
     await run_bridge(ws, telephony="plivo", direction=direction, caller=caller, purpose=purpose)
 
 

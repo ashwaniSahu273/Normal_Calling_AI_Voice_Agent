@@ -47,10 +47,10 @@ async def create_outbound_call(
     if not from_number:
         raise RuntimeError("PLIVO_FROM_NUMBER is not configured")
 
-    ctx_id = store(purpose=purpose, to=to) if purpose.strip() else ""
+    # Always store ctx so bridge gets callee number even if Answer form parse fails.
+    ctx_id = store(purpose=purpose, to=to.strip())
     url = answer_url or _public_url("/plivo/answer?direction=outbound")
-    if ctx_id:
-        url = f"{url}&ctx={quote(ctx_id)}"
+    url = f"{url}&ctx={quote(ctx_id)}"
     payload: dict[str, str] = {
         "from": from_number,
         "to": to.strip(),
@@ -92,3 +92,36 @@ async def redirect_call(call_uuid: str, answer_url: str, *, method: str = "GET")
             data = {"status": resp.text}
     log.info("Plivo redirect call_uuid=%s -> %s", call_uuid, answer_url)
     return data
+
+
+async def get_call(call_uuid: str) -> dict[str, Any] | None:
+    """Fetch live/completed call details (from_number / to_number)."""
+    if not call_uuid or not configured():
+        return None
+    api = f"{_BASE}/Account/{config.PLIVO_AUTH_ID}/Call/{call_uuid}/"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(api, auth=_auth())
+            if resp.status_code >= 400:
+                log.warning(
+                    "Plivo get_call failed status=%s uuid=%s",
+                    resp.status_code,
+                    call_uuid,
+                )
+                return None
+            return resp.json()
+    except Exception:  # noqa: BLE001
+        log.exception("Plivo get_call error uuid=%s", call_uuid)
+        return None
+
+
+def pick_remote_number(call: dict[str, Any] | None, *, direction: str) -> str:
+    """Customer phone from Plivo Call resource."""
+    if not call:
+        return ""
+    direction = (direction or "inbound").strip().lower()
+    frm = str(call.get("from_number") or call.get("from") or "").strip()
+    to = str(call.get("to_number") or call.get("to") or "").strip()
+    if direction == "outbound":
+        return to or frm
+    return frm or to

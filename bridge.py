@@ -52,7 +52,7 @@ class CallBridge:
         self.provider: RealtimeProvider | None = None
         self.stream_id: str | None = None
         self.call_id: str | None = None
-        self.caller: str | None = (caller or "").strip() or None
+        self.caller: str | None = self._normalize_phone(caller)
         self._closing = False
         self._call_logged = False
         self._transfer_pending = False
@@ -399,21 +399,23 @@ class CallBridge:
         except WebSocketDisconnect:
             log.info("%s WebSocket disconnected", self.telephony)
         except RuntimeError as exc:
-            if self._closing or "disconnect" in str(exc).lower():
-                log.info("%s WebSocket closed during transfer/hangup", self.telephony)
+            msg = str(exc).lower()
+            if self._closing or "not connected" in msg or "disconnect" in msg or "accept" in msg:
+                log.info("%s WebSocket closed during hangup/transfer", self.telephony)
             else:
                 log.exception("Error in telephony->provider loop")
         except Exception:  # noqa: BLE001
             log.exception("Error in telephony->provider loop")
 
     def _on_start(self, event: dict) -> None:
-        start = event.get("start", {})
+        start = event.get("start", {}) or {}
         if self.telephony == "exotel":
             self.stream_id = (
                 start.get("stream_sid") or event.get("stream_sid") or start.get("streamSid")
             )
             self.call_id = start.get("call_sid") or start.get("callSid")
-            self.caller = start.get("from")
+            if not self.caller:
+                self.caller = start.get("from") or start.get("From")
             mf = start.get("media_format") or {}
             try:
                 rate = int(mf.get("sample_rate") or config.EXOTEL_SAMPLE_RATE)
@@ -424,14 +426,113 @@ class CallBridge:
             self.stream_id = start.get("streamId") or start.get("stream_sid")
             self.call_id = start.get("callId") or start.get("call_sid")
             if not self.caller:
-                self.caller = (
-                    start.get("from")
-                    or start.get("From")
-                    or event.get("from")
-                    or event.get("From")
-                )
+                self.caller = self._caller_from_plivo_start(event, start)
             self._set_tel_rate(config.PLIVO_SAMPLE_RATE)
-        log.info("Stream start call_id=%s stream_id=%s from=%s", self.call_id, self.stream_id, self.caller)
+        if self.caller:
+            self.caller = self._normalize_phone(self.caller)
+        if not self.caller:
+            self._apply_cached_caller()
+        log.info(
+            "Stream start call_id=%s stream_id=%s from=%s direction=%s",
+            self.call_id,
+            self.stream_id,
+            self.caller or "-",
+            self._direction,
+        )
+        if not self.caller and self.telephony == "plivo":
+            asyncio.create_task(self._resolve_caller_from_plivo(), name="resolve-caller")
+
+    async def _resolve_caller_from_plivo(self) -> None:
+        if self.caller:
+            return
+        # stream-status often lands a moment after WS start
+        for delay in (0.0, 0.4, 1.0, 2.0):
+            if delay:
+                await asyncio.sleep(delay)
+            if self._closing and self.caller:
+                return
+            self._apply_cached_caller()
+            if self.caller:
+                return
+        if not self.call_id:
+            return
+        try:
+            from plivo_client import get_call, pick_remote_number
+
+            data = await get_call(self.call_id)
+            phone = pick_remote_number(data, direction=self._direction)
+            phone = self._normalize_phone(phone)
+            if phone:
+                self.caller = phone
+                log.info("Resolved caller via Plivo API call_id=%s from=%s", self.call_id, phone)
+            else:
+                log.warning("No remote number yet call_id=%s (CDR may lag)", self.call_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Failed to resolve caller via Plivo API")
+
+    def _apply_cached_caller(self) -> None:
+        """Use From saved from /plivo/answer or /plivo/stream-status."""
+        if self.caller:
+            return
+        try:
+            from call_meta import lookup, pick_caller
+
+            row = lookup(call_uuid=self.call_id or "", stream_id=self.stream_id or "")
+            phone = pick_caller(row, direction=self._direction)
+            phone = self._normalize_phone(phone)
+            if phone:
+                self.caller = phone
+                log.info(
+                    "Caller from call_meta call_id=%s stream_id=%s from=%s",
+                    self.call_id,
+                    self.stream_id,
+                    phone,
+                )
+        except Exception:  # noqa: BLE001
+            log.exception("call_meta lookup failed")
+
+    @staticmethod
+    def _normalize_phone(raw: str | None) -> str | None:
+        s = (raw or "").strip()
+        if not s:
+            return None
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if not digits:
+            return None
+        if len(digits) == 10:
+            digits = "91" + digits
+        return f"+{digits}" if not s.startswith("+") else f"+{digits}"
+
+    def _caller_from_plivo_start(self, event: dict, start: dict) -> str | None:
+        """Plivo WS start often omits From — check start, event, extra_headers."""
+        if self._direction == "outbound":
+            keys = ("to", "To", "caller", "Caller")
+        else:
+            keys = ("from", "From", "caller", "Caller")
+        for key in keys:
+            val = start.get(key) or event.get(key)
+            if val and str(val).strip():
+                return str(val).strip()
+        headers = event.get("extra_headers") or start.get("extra_headers") or ""
+        parsed = self._parse_extra_headers(str(headers))
+        if parsed.get("caller"):
+            return parsed["caller"]
+        if self._direction == "outbound" and parsed.get("to"):
+            return parsed["to"]
+        return None
+
+    @staticmethod
+    def _parse_extra_headers(raw: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for part in (raw or "").split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, _, v = part.partition("=")
+            k, v = k.strip().lower(), v.strip()
+            if k and v:
+                out[k] = v
+        return out
 
     def _set_tel_rate(self, rate: int) -> None:
         self._tel_rate = rate
@@ -660,6 +761,9 @@ class CallBridge:
     async def _notify_call_ended(self) -> None:
         if self._call_logged:
             return
+        # Last chance — Plivo start event often has no From
+        if not self.caller and self.call_id and self.telephony == "plivo":
+            await self._resolve_caller_from_plivo()
         self._call_logged = True
         duration = int(time.monotonic() - self._started_at)
         intent = self._guess_intent()

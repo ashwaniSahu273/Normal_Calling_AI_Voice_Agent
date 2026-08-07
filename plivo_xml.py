@@ -28,11 +28,19 @@ def answer_xml(*, direction: str = "inbound", caller: str = "", ctx: str = "") -
         qs += f"&ctx={quote(ctx)}"
     ws_url = _xml_url(f"wss://{config.PUBLIC_HOST}/plivo/stream?{qs}")
     status_cb = _xml_url(_host_url("/plivo/stream-status"))
+    # extraHeaders survive even if WS query params get stripped by some proxies
+    header_bits = [f"direction={direction}"]
+    if caller:
+        header_bits.append(f"caller={caller}")
+    if ctx:
+        header_bits.append(f"ctx={ctx}")
+    extra = html.escape(";".join(header_bits), quote=True)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<Response>\n"
         '  <Stream bidirectional="true" keepCallAlive="true" '
         f'contentType="{config.PLIVO_CONTENT_TYPE};rate={config.PLIVO_SAMPLE_RATE}" '
+        f'extraHeaders="{extra}" '
         f'statusCallbackUrl="{status_cb}" statusCallbackMethod="POST">'
         f"{ws_url}</Stream>\n"
         "</Response>\n"
