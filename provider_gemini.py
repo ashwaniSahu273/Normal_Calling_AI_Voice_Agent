@@ -109,7 +109,15 @@ class GeminiLiveProvider(RealtimeProvider):
         self._send_lock = asyncio.Lock()
         self._greeted = False
         self._continuity_digest = ""
+        self._call_direction = "inbound"
+        self._followup_purpose = ""
         self._session_started = time.monotonic()
+
+    def set_call_direction(self, direction: str) -> None:
+        self._call_direction = (direction or "inbound").strip().lower()
+
+    def set_followup_purpose(self, purpose: str) -> None:
+        self._followup_purpose = (purpose or "").strip()
 
     def set_continuity_digest(self, digest: str) -> None:
         self._continuity_digest = (digest or "").strip()
@@ -169,7 +177,12 @@ class GeminiLiveProvider(RealtimeProvider):
         )
 
     def _live_config(self) -> types.LiveConnectConfig:
-        system_prompt = (config.SYSTEM_PROMPT or "").strip() or knowledge.build_system_prompt()
+        if self._call_direction == "outbound":
+            system_prompt = knowledge.build_outbound_system_prompt(
+                purpose=self._followup_purpose
+            )
+        else:
+            system_prompt = (config.SYSTEM_PROMPT or "").strip() or knowledge.build_system_prompt()
         config.SYSTEM_PROMPT = system_prompt
         resume_kwargs: dict[str, Any] = {}
         if self._resume_handle:
@@ -213,19 +226,27 @@ class GeminiLiveProvider(RealtimeProvider):
         )
         self._session = await self._cm.__aenter__()
         if greet and not self._greeted:
+            if self._call_direction == "outbound":
+                purpose = self._followup_purpose
+                greet_text = (
+                    "OUTBOUND follow-up — the person just answered. "
+                    "Do NOT use inbound receptionist language. "
+                    f"Open with ONE short sentence like: {config.OUTBOUND_GREETING} "
+                )
+                if purpose:
+                    greet_text += f"Mention this follow-up reason naturally: {purpose}. "
+                greet_text += "Then listen — do not end the call."
+            else:
+                greet_text = (
+                    "Greet the caller now in ONE short sentence. "
+                    f"Use this greeting idea: {config.GREETING} "
+                    "Offer English or Hindi briefly if natural. "
+                    "Then keep listening — do not end the call."
+                )
             await self._session.send_client_content(
                 turns=types.Content(
                     role="user",
-                    parts=[
-                        types.Part(
-                            text=(
-                                "Greet the caller now in ONE short sentence. "
-                                f"Use this greeting idea: {config.GREETING} "
-                                "Offer English or Hindi briefly if natural. "
-                                "Then keep listening — do not end the call."
-                            )
-                        )
-                    ],
+                    parts=[types.Part(text=greet_text)],
                 ),
                 turn_complete=True,
             )

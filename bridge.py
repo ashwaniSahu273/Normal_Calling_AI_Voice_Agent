@@ -40,14 +40,22 @@ log = logging.getLogger("voice-agent.bridge")
 
 
 class CallBridge:
-    def __init__(self, tel_ws: WebSocket, telephony: str) -> None:
+    def __init__(
+        self,
+        tel_ws: WebSocket,
+        telephony: str,
+        direction: str = "inbound",
+        caller: str | None = None,
+    ) -> None:
         self.tel_ws = tel_ws
         self.telephony = telephony
         self.provider: RealtimeProvider | None = None
         self.stream_id: str | None = None
         self.call_id: str | None = None
-        self.caller: str | None = None
+        self.caller: str | None = (caller or "").strip() or None
         self._closing = False
+        self._call_logged = False
+        self._transfer_pending = False
         self._exotel_out = audio.FrameBuffer(config.EXOTEL_FRAME_BYTES)
         self._in_resampler: audio.Resampler | None = None
         self._out_resampler: audio.Resampler | None = None
@@ -67,7 +75,8 @@ class CallBridge:
         self._appointment_booked = False
         self._lead_captured = False
         self._follow_up = "none"
-        self._direction = "inbound"
+        self._direction = (direction or "inbound").strip().lower()
+        self._followup_purpose = ""
         self._soft_reset_busy = False
         self._farewell_pending = False
         self._farewell_force_task: asyncio.Task | None = None
@@ -137,21 +146,28 @@ class CallBridge:
     async def run(self) -> None:
         await self.tel_ws.accept()
         self.provider = make_provider()
+        self.provider.set_call_direction(self._direction)
+        if self._followup_purpose:
+            self.provider.set_followup_purpose(self._followup_purpose)
+
+        # Read Plivo WebSocket immediately — waiting for Gemini first drops outbound calls.
+        tel_task = asyncio.create_task(self._telephony_to_provider(), name="tel->ai")
         try:
             await self.provider.connect()
         except Exception:
             log.exception("AI provider failed to connect — closing call")
+            tel_task.cancel()
             await self._teardown()
             return
 
         log.info(
-            "Bridge established (telephony=%s, ai=%s)",
+            "Bridge established (telephony=%s, ai=%s, direction=%s)",
             self.telephony,
             config.AI_PROVIDER,
+            self._direction,
         )
         self._touch()
 
-        tel_task = asyncio.create_task(self._telephony_to_provider(), name="tel->ai")
         ai_task = asyncio.create_task(self._provider_to_telephony(), name="ai->tel")
         watch_task = asyncio.create_task(self._watchdog(), name="watchdog")
         nudge_task = asyncio.create_task(self._response_nudge_loop(), name="nudge")
@@ -239,6 +255,48 @@ class CallBridge:
 
         self._hangup_task = asyncio.create_task(_do(), name="hangup")
 
+    async def _request_transfer(self, summary: str = "") -> None:
+        if self._transfer_pending:
+            return
+        if not config.HUMAN_AGENT_NUMBER:
+            log.error("transfer_to_human requested but HUMAN_AGENT_NUMBER is not set")
+            return
+        self._transfer_pending = True
+        self._end_reason = "transferred"
+        self._follow_up = "human_agent"
+        if summary:
+            self._end_summary = summary
+        elif not self._end_summary:
+            self._end_summary = self._fallback_summary()
+
+        async def _do() -> None:
+            await asyncio.sleep(config.TRANSFER_GRACE_SEC)
+            try:
+                await self._notify_call_ended()
+            except Exception:  # noqa: BLE001
+                log.exception("Failed to log call before transfer")
+            if self.telephony == "plivo" and self.call_id:
+                try:
+                    from plivo_client import configured, redirect_call
+
+                    if configured():
+                        await redirect_call(
+                            self.call_id,
+                            f"https://{config.PUBLIC_HOST.rstrip('/')}/plivo/transfer",
+                        )
+                        self._closing = True
+                        return
+                    log.error("Plivo creds missing — cannot redirect call for transfer")
+                except Exception:  # noqa: BLE001
+                    log.exception("Plivo transfer redirect failed")
+            self._closing = True
+            try:
+                await self.tel_ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        self._hangup_task = asyncio.create_task(_do(), name="transfer")
+
     async def _on_caller_farewell(self, text: str) -> None:
         if self._closing or self._farewell_pending:
             return
@@ -309,7 +367,7 @@ class CallBridge:
     async def _telephony_to_provider(self) -> None:
         assert self.provider is not None
         try:
-            while True:
+            while not self._closing:
                 raw = await self.tel_ws.receive_text()
                 event = json.loads(raw)
                 kind = event.get("event")
@@ -340,6 +398,11 @@ class CallBridge:
                     break
         except WebSocketDisconnect:
             log.info("%s WebSocket disconnected", self.telephony)
+        except RuntimeError as exc:
+            if self._closing or "disconnect" in str(exc).lower():
+                log.info("%s WebSocket closed during transfer/hangup", self.telephony)
+            else:
+                log.exception("Error in telephony->provider loop")
         except Exception:  # noqa: BLE001
             log.exception("Error in telephony->provider loop")
 
@@ -360,7 +423,13 @@ class CallBridge:
         else:
             self.stream_id = start.get("streamId") or start.get("stream_sid")
             self.call_id = start.get("callId") or start.get("call_sid")
-            self.caller = start.get("from")
+            if not self.caller:
+                self.caller = (
+                    start.get("from")
+                    or start.get("From")
+                    or event.get("from")
+                    or event.get("From")
+                )
             self._set_tel_rate(config.PLIVO_SAMPLE_RATE)
         log.info("Stream start call_id=%s stream_id=%s from=%s", self.call_id, self.stream_id, self.caller)
 
@@ -509,6 +578,15 @@ class CallBridge:
             await self._request_hangup()
             return
 
+        if call.name == "transfer_to_human":
+            summary = str(call.arguments.get("summary") or "")
+            reason = str(call.arguments.get("reason") or "caller request")
+            self._caller_intent = reason
+            self._farewell_pending = True
+            log.info("transfer_to_human reason=%s", reason)
+            await self._request_transfer(summary=summary)
+            return
+
         if call.name == "book_appointment":
             self._appointment_booked = True
             self._follow_up = "appointment"
@@ -559,6 +637,7 @@ class CallBridge:
             "silence": "Ended after silence",
             "max_duration": "Max call time reached",
             "hangup": "Caller hung up",
+            "transferred": "Transferred to human agent",
             "other": "Ended",
         }
         return mapping.get(self._end_reason, self._end_reason or "Ended")
@@ -579,6 +658,9 @@ class CallBridge:
         return f"{sec} sec"
 
     async def _notify_call_ended(self) -> None:
+        if self._call_logged:
+            return
+        self._call_logged = True
         duration = int(time.monotonic() - self._started_at)
         intent = self._guess_intent()
         next_step = sheet_next_step_label(
@@ -623,8 +705,13 @@ class CallBridge:
             "conversation_full": conversation_full,
             "transcript_turns": transcript_turns,
             "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
+            "direction": self._direction,
         }
-        ctx = {"call_id": self._stable_call_id(), "from": self.caller}
+        ctx = {
+            "call_id": self._stable_call_id(),
+            "from": self.caller,
+            "direction": self._direction,
+        }
         try:
             await call_n8n("call_ended", args, ctx)
         except Exception:  # noqa: BLE001
@@ -651,6 +738,15 @@ class CallBridge:
         )
 
 
-async def run_bridge(ws: WebSocket, telephony: str | None = None) -> None:
+async def run_bridge(
+    ws: WebSocket,
+    telephony: str | None = None,
+    direction: str = "inbound",
+    caller: str | None = None,
+    purpose: str | None = None,
+) -> None:
     tel = (telephony or config.TELEPHONY_PROVIDER).lower()
-    await CallBridge(ws, telephony=tel).run()
+    bridge = CallBridge(ws, telephony=tel, direction=direction, caller=caller)
+    if purpose:
+        bridge._followup_purpose = purpose.strip()
+    await bridge.run()

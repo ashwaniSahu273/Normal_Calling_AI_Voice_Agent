@@ -401,28 +401,25 @@ Content-Type should be `application/xml`.
 
 ---
 
-## 13. Outbound calls (later)
+## 13. Outbound calls + human handover
 
-To **call a customer** and connect them to the same AI:
+Implemented in this repo. See **[POC_HANDOVER_OUTBOUND.md](POC_HANDOVER_OUTBOUND.md)** for manager demo steps.
+
+**Outbound** — `POST /plivo/outbound` with header `x-voice-secret`:
 
 ```http
 POST https://api.plivo.com/v1/Account/{auth_id}/Call/
 ```
 
-| Parameter | Value |
-|-----------|--------|
-| `from` | Your Plivo number (E.164) |
-| `to` | Customer number |
-| `answer_url` | Same as inbound: `https://<PUBLIC_HOST>/plivo/answer` |
-| `answer_method` | `GET` |
+Same answer URL as inbound (`/plivo/answer?direction=outbound`).
 
-Use **Basic auth** with Plivo `AUTH_ID` and `AUTH_TOKEN` from console.
+**Human transfer** — AI calls `transfer_to_human` tool → Plivo redirects to `/plivo/transfer` → dials `HUMAN_AGENT_NUMBER`.
 
-**India:** Outbound caller ID must be a **Plivo-rented Indian number** — not a verified external SIM.
+**Agent-first** — set `AGENT_FIRST_ENABLED=true` in `.env`; rings human before AI.
+
+Required `.env`: `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_FROM_NUMBER`, `HUMAN_AGENT_NUMBER`, `OUTBOUND_API_SECRET`.
 
 Docs: [Calls API](https://www.plivo.com/docs/voice/api/calls)
-
-Outbound is **not coded in this repo yet** — use Plivo API or add a Node endpoint later.
 
 ---
 

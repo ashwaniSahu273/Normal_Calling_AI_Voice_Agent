@@ -54,6 +54,19 @@ GREETING = os.getenv(
     ),
 ).strip()
 
+# Outbound follow-up calls — YOU called THEM (not inbound receptionist)
+OUTBOUND_GREETING = os.getenv(
+    "OUTBOUND_GREETING",
+    (
+        f"Hi, this is calling from {BUSINESS_NAME}. "
+        "We are following up on your recent inquiry. "
+        "Is this a good time to talk for a minute?"
+    ),
+).strip()
+
+# Optional override for outbound AI rules (see knowledge.build_outbound_system_prompt)
+OUTBOUND_FOLLOWUP_PROMPT = os.getenv("OUTBOUND_FOLLOWUP_PROMPT", "").strip()
+
 # Base personality — language + company facts are appended in knowledge.build_system_prompt()
 SYSTEM_PROMPT_BASE = os.getenv(
     "SYSTEM_PROMPT",
@@ -105,6 +118,26 @@ KNOWLEDGE_SEARCH_LOCAL_FIRST = os.getenv("KNOWLEDGE_SEARCH_LOCAL_FIRST", "true")
     "yes",
 )
 KNOWLEDGE_SEARCH_MAX_CHARS = int(os.getenv("KNOWLEDGE_SEARCH_MAX_CHARS", "2000"))
+
+# Plivo REST (outbound + mid-call transfer) — Console → Account → Auth ID / Auth Token
+PLIVO_AUTH_ID = os.getenv("PLIVO_AUTH_ID", "").strip()
+PLIVO_AUTH_TOKEN = os.getenv("PLIVO_AUTH_TOKEN", "").strip()
+# E.164 caller ID for outbound, e.g. +912264233283
+PLIVO_FROM_NUMBER = os.getenv("PLIVO_FROM_NUMBER", "").strip()
+
+# Human agent mobile/landline (E.164) for transfer + agent-first ring
+HUMAN_AGENT_NUMBER = os.getenv("HUMAN_AGENT_NUMBER", "").strip()
+# Ring human before AI on inbound (requires HUMAN_AGENT_NUMBER + Plivo creds)
+AGENT_FIRST_ENABLED = os.getenv("AGENT_FIRST_ENABLED", "false").lower() in ("1", "true", "yes")
+AGENT_FIRST_TIMEOUT_SEC = int(os.getenv("AGENT_FIRST_TIMEOUT_SEC", "25"))
+AGENT_FIRST_ANNOUNCEMENT = os.getenv("AGENT_FIRST_ANNOUNCEMENT", "").strip()
+AGENT_FALLBACK_ANNOUNCEMENT = os.getenv("AGENT_FALLBACK_ANNOUNCEMENT", "").strip()
+TRANSFER_ANNOUNCEMENT = os.getenv("TRANSFER_ANNOUNCEMENT", "").strip()
+# Seconds to let AI finish "connecting you…" before Plivo redirect
+TRANSFER_GRACE_SEC = float(os.getenv("TRANSFER_GRACE_SEC", "3.0"))
+
+# Protect POST /plivo/outbound (header x-voice-secret or Bearer token)
+OUTBOUND_API_SECRET = os.getenv("OUTBOUND_API_SECRET", "").strip()
 
 TELEPHONY_SAMPLE_RATE = 8000
 PLIVO_CONTENT_TYPE = "audio/x-mulaw"

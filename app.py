@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 from bridge import run_bridge
-from plivo_xml import answer_xml
+from plivo_xml import agent_first_xml, answer_xml, dial_fallback_xml, transfer_xml
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,39 +53,198 @@ async def _startup() -> None:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "ai": config.AI_PROVIDER,
         "telephony": config.TELEPHONY_PROVIDER,
+        "agent_first": config.AGENT_FIRST_ENABLED and bool(config.HUMAN_AGENT_NUMBER),
+        "human_transfer": bool(config.HUMAN_AGENT_NUMBER),
     }
+
+
+async def _plivo_form_value_async(request: Request, *keys: str) -> str:
+    for key in keys:
+        val = request.query_params.get(key)
+        if val:
+            return str(val)
+    try:
+        form = await request.form()
+        for key in keys:
+            val = form.get(key)
+            if val:
+                return str(val)
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _check_outbound_secret(request: Request) -> bool:
+    secret = (config.OUTBOUND_API_SECRET or "").strip()
+    if not secret:
+        return False
+    header = (request.headers.get("x-voice-secret") or "").strip()
+    if header and header == secret:
+        return True
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer ") and auth[7:].strip() == secret:
+        return True
+    return False
 
 
 # ---- Plivo (fallback once KYC / compliance is done) ---------------------
 
 @app.api_route("/plivo/answer", methods=["GET", "POST"])
 async def plivo_answer(request: Request) -> PlainTextResponse:
-    """Plivo Answer URL -> Stream XML pointing at /plivo/stream."""
+    """Plivo Answer URL → agent-first, AI stream, or outbound stream."""
     if not config.PUBLIC_HOST:
         return PlainTextResponse("PUBLIC_HOST is not configured", status_code=500)
+
+    mode = (request.query_params.get("mode") or "").strip().lower()
+    direction = (request.query_params.get("direction") or "inbound").strip().lower()
+    ctx = (request.query_params.get("ctx") or "").strip()
+    caller_from = ""
+
     try:
-        if request.method == "POST":
-            form = await request.form()
+        call_uuid = await _plivo_form_value_async(
+            request, "CallUUID", "call_uuid", "Uuid", "uuid"
+        )
+        caller_from = await _plivo_form_value_async(request, "From", "from")
+        caller_to = await _plivo_form_value_async(request, "To", "to")
+        if direction == "outbound" and caller_to:
+            caller_from = caller_to
+        if call_uuid or caller_from:
             log.info(
-                "Plivo answer call_uuid=%s from=%s to=%s",
-                form.get("CallUUID") or form.get("call_uuid"),
-                form.get("From") or form.get("from"),
-                form.get("To") or form.get("to"),
+                "Plivo answer call_uuid=%s from=%s to=%s mode=%s direction=%s",
+                call_uuid,
+                caller_from,
+                caller_to,
+                mode or "-",
+                direction,
             )
     except Exception:  # noqa: BLE001
         pass
-    return PlainTextResponse(answer_xml(), media_type="application/xml")
+
+    if mode == "ai" or direction == "outbound":
+        return PlainTextResponse(
+            answer_xml(direction=direction, caller=caller_from, ctx=ctx),
+            media_type="application/xml",
+        )
+
+    if (
+        config.AGENT_FIRST_ENABLED
+        and config.HUMAN_AGENT_NUMBER
+        and direction == "inbound"
+    ):
+        return PlainTextResponse(agent_first_xml(), media_type="application/xml")
+
+    return PlainTextResponse(
+        answer_xml(direction=direction, caller=caller_from),
+        media_type="application/xml",
+    )
+
+
+@app.api_route("/plivo/dial-status", methods=["GET", "POST"])
+async def plivo_dial_status(request: Request) -> PlainTextResponse:
+    """Agent-first: human did not answer → fall back to AI."""
+    status = (
+        await _plivo_form_value_async(
+            request,
+            "DialStatus",
+            "DialActionStatus",
+            "dial_status",
+        )
+    ).lower()
+    log.info("Plivo dial-status status=%s", status or "unknown")
+    if status in ("completed", "answer", "answered"):
+        return PlainTextResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml",
+        )
+    return PlainTextResponse(dial_fallback_xml(), media_type="application/xml")
+
+
+@app.api_route("/plivo/transfer", methods=["GET", "POST"])
+async def plivo_transfer(_request: Request) -> PlainTextResponse:
+    """Mid-call AI → human handover XML."""
+    if not config.HUMAN_AGENT_NUMBER:
+        return PlainTextResponse(
+            "HUMAN_AGENT_NUMBER is not configured", status_code=500
+        )
+    return PlainTextResponse(transfer_xml(), media_type="application/xml")
+
+
+@app.api_route("/plivo/stream-status", methods=["GET", "POST"])
+async def plivo_stream_status(request: Request) -> PlainTextResponse:
+    """Plivo Stream lifecycle callbacks — log DroppedStream for debugging."""
+    event = await _plivo_form_value_async(request, "Event", "event")
+    err = await _plivo_form_value_async(request, "Error", "error")
+    call_uuid = await _plivo_form_value_async(request, "CallUUID", "call_uuid")
+    stream_id = await _plivo_form_value_async(request, "StreamID", "StreamId", "stream_id")
+    if event:
+        log.info(
+            "Plivo stream-status event=%s call_uuid=%s stream_id=%s error=%s",
+            event,
+            call_uuid,
+            stream_id,
+            err or "-",
+        )
+    return PlainTextResponse("ok")
+
+
+@app.post("/plivo/outbound")
+async def plivo_outbound(request: Request) -> JSONResponse:
+    """Start outbound call — AI calls the customer. Requires x-voice-secret header."""
+    if not _check_outbound_secret(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    to = str(body.get("to") or "").strip()
+    purpose = str(body.get("purpose") or "").strip()
+    if not to:
+        return JSONResponse({"error": "to is required (E.164)"}, status_code=400)
+
+    try:
+        from plivo_client import configured, create_outbound_call
+
+        if not configured():
+            return JSONResponse(
+                {"error": "PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN not configured"},
+                status_code=503,
+            )
+        data = await create_outbound_call(to, purpose=purpose)
+        return JSONResponse(
+            {
+                "ok": True,
+                "to": to,
+                "direction": "outbound",
+                "purpose": purpose or None,
+                "request_uuid": data.get("request_uuid"),
+                "message_uuid": data.get("message_uuid"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Outbound call failed")
+        return JSONResponse({"error": str(exc)}, status_code=502)
 
 
 @app.websocket("/plivo/stream")
 @app.websocket("/stream")  # kept for older Plivo XML that still uses /stream
 async def plivo_stream(ws: WebSocket) -> None:
-    await run_bridge(ws, telephony="plivo")
+    from outbound_ctx import get as get_outbound_ctx
+
+    direction = (ws.query_params.get("direction") or "inbound").strip().lower()
+    caller = (ws.query_params.get("caller") or "").strip() or None
+    purpose = None
+    ctx = (ws.query_params.get("ctx") or "").strip()
+    if ctx:
+        row = get_outbound_ctx(ctx)
+        if row:
+            purpose = row.get("purpose") or None
+    await run_bridge(ws, telephony="plivo", direction=direction, caller=caller, purpose=purpose)
 
 
 # ---- Exotel Voicebot (primary while Plivo compliance is pending) --------

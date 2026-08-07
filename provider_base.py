@@ -68,6 +68,14 @@ class RealtimeProvider(abc.ABC):
         """Optional: ask the model to speak if it went quiet mid-call."""
         return
 
+    def set_call_direction(self, direction: str) -> None:
+        """Optional: inbound vs outbound — tune greeting."""
+        return
+
+    def set_followup_purpose(self, purpose: str) -> None:
+        """Optional: why this outbound call was placed."""
+        return
+
     async def refresh_session(self, digest: str = "") -> None:
         """Optional: soft-reset AI session mid-call (latency / context trim)."""
         return

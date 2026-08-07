@@ -173,7 +173,17 @@ def build_system_prompt(*, force: bool = False) -> str:
         "- end_call summary: 2–3 sentences for the owner (topic, what you answered, next step)."
     )
 
-    chunks = [base, language_block, persona_block, listen_block, style_block, hangup_block]
+    handover_block = (
+        "HUMAN HANDOVER:\n"
+        "- If the caller asks for a person, human, manager, executive, or 'real agent', "
+        "say ONE short line ('I'll connect you to our team now') then call transfer_to_human.\n"
+        "- Use transfer_to_human when you tried lookup_knowledge but the issue needs a human "
+        "(custom pricing, contract, urgent complaint).\n"
+        "- Do NOT call transfer_to_human for simple FAQ you can answer from knowledge.\n"
+        "- Include a short summary in transfer_to_human so the human agent knows the context."
+    )
+
+    chunks = [base, language_block, persona_block, listen_block, style_block, handover_block, hangup_block]
     if knowledge:
         chunks.append(f"COMPANY KNOWLEDGE (use for accurate answers):\n{knowledge}")
     if config.BUSINESS_WEBSITE:
@@ -189,6 +199,40 @@ def build_system_prompt(*, force: bool = False) -> str:
 
     _prompt_cached = "\n\n".join(chunks)
     return _prompt_cached
+
+
+def build_outbound_system_prompt(*, purpose: str = "") -> str:
+    """Follow-up caller persona for outbound — not inbound receptionist."""
+    base = build_system_prompt()
+    custom = (config.OUTBOUND_FOLLOWUP_PROMPT or "").strip()
+    purpose_line = (purpose or "").strip()
+
+    followup_block = custom or (
+        "OUTBOUND FOLLOW-UP CALL (critical):\n"
+        "- YOU placed this call — the person just answered their phone.\n"
+        "- NEVER say: thank you for calling, welcome, how may I help you today, "
+        "or anything that sounds like an inbound receptionist.\n"
+        "- You are following up — polite, brief, not pushy.\n"
+        "\n"
+        "OPENING FLOW:\n"
+        "1. Confirm you reached the right person (ask their name if unknown).\n"
+        "2. Say you are calling from the company about their earlier inquiry.\n"
+        "3. Ask if now is a good time — if not, offer a callback time and use send_notification.\n"
+        "\n"
+        "FOLLOW-UP GOALS (pick what fits the conversation):\n"
+        "- Confirm a demo or meeting booking (date, time, service).\n"
+        "- Check if they still need app, web, software, or digital marketing help.\n"
+        "- Follow up on a quote or proposal you sent.\n"
+        "- Remind about a scheduled callback.\n"
+        "- Capture updated requirements with create_lead if interest continues.\n"
+        "- Book appointment with book_appointment when they agree on date/time.\n"
+        "\n"
+        "If they are not interested, thank them briefly and call end_call — do not push."
+    )
+    if purpose_line:
+        followup_block += f"\n\nSPECIFIC REASON FOR THIS CALL:\n{purpose_line}"
+
+    return f"{base}\n\n{followup_block}"
 
 
 def _tokenize(query: str) -> list[str]:

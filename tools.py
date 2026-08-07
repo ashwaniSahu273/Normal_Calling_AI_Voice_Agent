@@ -75,6 +75,29 @@ TOOL_DEFS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "transfer_to_human",
+        "description": (
+            "Connect the caller to a live human agent. Use when they ask to speak with a person, "
+            "manager, sales executive, or real agent — or when you cannot help after trying lookup_knowledge. "
+            "Say ONE short line like 'I'll connect you to our team now', then call this tool immediately."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Why transfer is needed, e.g. pricing negotiation, technical issue, caller request",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "2-3 sentence summary for the human agent (topic + caller name if known)",
+                },
+            },
+            "required": ["reason"],
+        },
+    },
+    {
+        "type": "function",
         "name": "end_call",
         "description": (
             "End the call when the caller says thanks, goodbye, or does not want to continue. "
@@ -120,6 +143,14 @@ TOOL_DEFS: list[dict[str, Any]] = [
 
 
 async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any]) -> str:
+    if name == "transfer_to_human":
+        return json.dumps(
+            {
+                "status": "transferring",
+                "message": "Connecting caller to human agent.",
+                "reason": arguments.get("reason") or "caller request",
+            }
+        )
     if name == "end_call":
         return json.dumps(
             {
