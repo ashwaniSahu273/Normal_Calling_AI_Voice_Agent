@@ -4,6 +4,7 @@ Step-by-step guide to connect **Plivo** to this voice-agent repo after **KYC is 
 
 **You need:** Plivo account (KYC done), Gemini API key, n8n webhook (optional), a public HTTPS URL.
 
+**How the system works (diagrams, all URLs, every file):** **[FLOW.md](FLOW.md)**  
 **Official Plivo docs:** [Voice quickstart](https://www.plivo.com/docs/voice/quickstart/quickstart) · [Numbers](https://www.plivo.com/docs/numbers) · [India numbers](https://www.plivo.com/docs/numbers/rent-india-numbers)
 
 ---
@@ -29,27 +30,34 @@ Step-by-step guide to connect **Plivo** to this voice-agent repo after **KYC is 
 
 ## 1. Overview — how Plivo connects to this repo
 
+> Full diagrams + every URL/file: **[FLOW.md](FLOW.md)**
+
 ```
 Caller dials your Plivo number
         ↓
-Plivo → GET/POST https://YOUR_HOST/plivo/answer
+Plivo → GET/POST https://YOUR_HOST/plivo/answer     ← only URL you paste in Plivo console
         ↓
-Your server returns XML → open WebSocket wss://YOUR_HOST/plivo/stream
+Your server returns XML → Plivo opens wss://YOUR_HOST/plivo/stream  (automatic)
         ↓
 bridge.py ↔ Gemini Live (AI speaks & listens)
         ↓
 Call ends → n8n → Google Sheet + WhatsApp (optional)
 ```
 
-| URL | Purpose |
-|-----|---------|
-| `https://<PUBLIC_HOST>/plivo/answer` | Plivo **Answer URL** — returns Stream XML |
-| `wss://<PUBLIC_HOST>/plivo/stream` | Bidirectional audio (mu-law 8 kHz) |
-| `https://<PUBLIC_HOST>/health` | Health check |
+| URL | Who calls it | Purpose |
+|-----|--------------|---------|
+| `https://<PUBLIC_HOST>/plivo/answer` | Plivo (Answer URL) | Returns Stream / Dial XML |
+| `wss://<PUBLIC_HOST>/plivo/stream` | Plivo (from XML `<Stream>`) | Bidirectional audio |
+| `https://<PUBLIC_HOST>/plivo/stream-status` | Plivo (from XML callback) | Stream events + caller number |
+| `https://<PUBLIC_HOST>/plivo/transfer` | Plivo (after Transfer API) | Dial human agent |
+| `https://<PUBLIC_HOST>/plivo/dial-status` | Plivo (agent-first Dial) | Fallback to AI |
+| `https://<PUBLIC_HOST>/plivo/outbound` | You / n8n (REST) | Start outbound call |
+| `https://<PUBLIC_HOST>/health` | You | Health check |
 
-**Audio:** Plivo uses **G.711 mu-law @ 8 kHz** — already handled in `bridge.py` and `audio.py`.
+**Audio:** Plivo uses **G.711 mu-law @ 8 kHz** — handled in `bridge.py` and `audio.py`.
 
-**No Plivo Auth ID / Secret in `.env` for inbound** — Plivo calls *your* URLs. You only need Plivo API credentials later for **outbound** calls.
+**Inbound needs no Plivo Auth in console wiring** — Plivo calls *your* Answer URL.  
+`PLIVO_AUTH_ID` / `PLIVO_AUTH_TOKEN` are required for **outbound** and **AI→human transfer**.
 
 ---
 
@@ -403,15 +411,15 @@ Content-Type should be `application/xml`.
 
 ## 13. Outbound calls + human handover
 
-Implemented in this repo. See **[POC_HANDOVER_OUTBOUND.md](POC_HANDOVER_OUTBOUND.md)** for manager demo steps.
+Implemented in this repo. Demo steps + diagrams: **[FLOW.md](FLOW.md)** §12 (POC demos) and §6–7.
 
-**Outbound** — `POST /plivo/outbound` with header `x-voice-secret`:
+**Outbound** — `POST https://YOUR_HOST/plivo/outbound` with header `x-voice-secret`:
 
-```http
-POST https://api.plivo.com/v1/Account/{auth_id}/Call/
+```json
+{ "to": "+91XXXXXXXXXX", "purpose": "confirm demo Friday 3 PM" }
 ```
 
-Same answer URL as inbound (`/plivo/answer?direction=outbound`).
+Plivo then hits the same Answer URL with `?direction=outbound&ctx=…`.
 
 **Human transfer** — AI calls `transfer_to_human` tool → Plivo redirects to `/plivo/transfer` → dials `HUMAN_AGENT_NUMBER`.
 
@@ -441,10 +449,10 @@ Docs: [Calls API](https://www.plivo.com/docs/voice/api/calls)
 
 | Goal | Doc |
 |------|-----|
+| Architecture + all URLs/files | **[FLOW.md](FLOW.md)** |
 | Full ops (env, voice, Sheets) | [GUIDE.md](GUIDE.md) |
 | ResilioHub Node backend + multi-tenant | [INTEGRATION.md](INTEGRATION.md) |
-| Architecture PDF | `Voice_Agent_Complete_Flow_Guide.pdf` |
 
 ---
 
-*Last updated: 2026-08-06 — Post-KYC Plivo inbound setup*
+*Last updated: 2026-08-07 — Post-KYC Plivo + FLOW.md*

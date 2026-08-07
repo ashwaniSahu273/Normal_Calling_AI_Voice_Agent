@@ -2,9 +2,9 @@
 
 Everything you need to **run**, **configure**, and **troubleshoot** the Python voice bridge (Gemini + Plivo/Exotel + n8n).
 
-For **ResilioHub product integration** (Node backend, multi-tenant, clients) see **[INTEGRATION.md](INTEGRATION.md)**.
+**How URLs and files connect (diagrams):** **[FLOW.md](FLOW.md)** — read this if you only set `/plivo/answer` in Plivo and want to know how `/plivo/stream`, transfer, and outbound work.
 
-For a visual architecture PDF: `docs/Voice_Agent_Complete_Flow_Guide.pdf` (regenerate with `python scripts/generate_flow_pdf.py`).
+For **ResilioHub product integration** (Node backend, multi-tenant, clients) see **[INTEGRATION.md](INTEGRATION.md)**.
 
 ---
 
@@ -43,7 +43,7 @@ Put tunnel host (no `https://`) in `.env` → `PUBLIC_HOST`.
 
 **Health check:** `https://<PUBLIC_HOST>/health` → `{"status":"ok","ai":"gemini","telephony":"plivo"}`
 
-**Flow:**
+**Flow (details + diagrams):** **[FLOW.md](FLOW.md)**
 
 ```
 Caller → Plivo/Exotel → WebSocket → Gemini Live → tools → n8n
