@@ -188,9 +188,23 @@ Switch provider: change `TELEPHONY_PROVIDER` in `.env` only — no code change.
 
 | Source | Config |
 |--------|--------|
-| Curated FAQ | Edit **`data/business_knowledge.md`** (best accuracy) |
-| Website scrape | `BUSINESS_WEBSITE` in `.env` |
+| **Knowledge profile** | `KNOWLEDGE_PROFILE=resiliencesoft` \| `resiliohub` \| `custom` |
+| Curated FAQ | `data/business_knowledge.md` (agency) or `data/resiliohub_knowledge.md` (product) |
+| Website scrape | `BUSINESS_WEBSITE` (only if curated file is short) |
 | Extra line | `BUSINESS_CONTEXT` |
+
+**Switch without restart** (header `x-voice-secret` = `OUTBOUND_API_SECRET`):
+
+```bash
+curl http://127.0.0.1:5000/plivo/knowledge-profile
+
+curl -X POST http://127.0.0.1:5000/plivo/knowledge-profile \
+  -H "Content-Type: application/json" \
+  -H "x-voice-secret: YOUR_SECRET" \
+  -d "{\"profile\":\"resiliohub\"}"
+```
+
+Or set `KNOWLEDGE_PROFILE` in `.env` and restart. Next call uses that knowledge.
 
 **`lookup_knowledge` tool:** searches local file first (`KNOWLEDGE_SEARCH_LOCAL_FIRST=true`), then n8n/backend if empty.
 

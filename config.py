@@ -34,6 +34,56 @@ N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 # WhatsApp notify number for call summaries (digits, with country code e.g. 91XXXXXXXXXX)
 NOTIFY_WHATSAPP = os.getenv("NOTIFY_WHATSAPP", "").strip()
 
+# --- Knowledge profiles (switch which business the AI answers as) ---
+# resiliencesoft = agency / custom software (data/business_knowledge.md)
+# resiliohub     = WhatsApp CRM product (data/resiliohub_knowledge.md)
+# custom         = use BUSINESS_* / GREETING from .env only
+_KNOWLEDGE_PROFILES: dict[str, dict[str, str]] = {
+    "resiliencesoft": {
+        "business_name": "ResilienceSoft",
+        "website": "https://www.resiliencesoft.com/",
+        "file": "data/business_knowledge.md",
+        "greeting": (
+            "Thank you for calling ResilienceSoft. "
+            "I can help in English or Hindi — how may I help you?"
+        ),
+        "outbound_greeting": (
+            "Hi, this is calling from ResilienceSoft. "
+            "We are following up on your inquiry about our services. "
+            "Is this a good time to talk for a minute?"
+        ),
+        "system_prompt": (
+            "You are a warm, accurate phone receptionist for ResilienceSoft. "
+            "Answer only from company knowledge and tool results. "
+            "Keep every spoken reply under 2 short sentences. Ask one question at a time. "
+            "Never monologue. Use tools when needed."
+        ),
+    },
+    "resiliohub": {
+        "business_name": "ResilioHub",
+        "website": "https://resiliohub.com/",
+        "file": "data/resiliohub_knowledge.md",
+        "greeting": (
+            "Thank you for calling ResilioHub. "
+            "I can help in English or Hindi with our WhatsApp CRM — how may I help you?"
+        ),
+        "outbound_greeting": (
+            "Hi, this is calling from ResilioHub. "
+            "We are following up on your WhatsApp CRM enquiry. "
+            "Is this a good time to talk for a minute?"
+        ),
+        "system_prompt": (
+            "You are a warm, accurate phone receptionist for ResilioHub, "
+            "the WhatsApp Business API CRM by ResilienceSoft. "
+            "Answer only from company knowledge and tool results. "
+            "Keep every spoken reply under 2 short sentences. Ask one question at a time. "
+            "Never monologue. Use tools when needed."
+        ),
+    },
+}
+
+KNOWLEDGE_PROFILE = (os.getenv("KNOWLEDGE_PROFILE", "resiliencesoft") or "resiliencesoft").strip().lower()
+
 BUSINESS_NAME = os.getenv("BUSINESS_NAME", "our business").strip()
 BUSINESS_WEBSITE = os.getenv("BUSINESS_WEBSITE", "").strip()
 # Curated facts (best accuracy). Prefer this over raw website scrape.
@@ -80,6 +130,50 @@ SYSTEM_PROMPT_BASE = os.getenv(
 
 # Filled on startup / connect via knowledge.build_system_prompt()
 SYSTEM_PROMPT = SYSTEM_PROMPT_BASE
+
+
+def list_knowledge_profiles() -> dict[str, str]:
+    return {
+        "resiliencesoft": "Agency / custom software — data/business_knowledge.md",
+        "resiliohub": "WhatsApp CRM product — data/resiliohub_knowledge.md",
+        "custom": "Use BUSINESS_NAME / WEBSITE / CONTEXT_FILE / GREETING from .env as-is",
+    }
+
+
+def apply_knowledge_profile(profile: str | None = None) -> str:
+    """Apply a named knowledge profile (updates BUSINESS_* + greetings). Returns profile id."""
+    global KNOWLEDGE_PROFILE, BUSINESS_NAME, BUSINESS_WEBSITE, BUSINESS_CONTEXT_FILE
+    global GREETING, OUTBOUND_GREETING, SYSTEM_PROMPT_BASE, SYSTEM_PROMPT
+
+    name = (profile if profile is not None else KNOWLEDGE_PROFILE).strip().lower()
+    if name in ("", "custom"):
+        KNOWLEDGE_PROFILE = "custom"
+        return KNOWLEDGE_PROFILE
+    if name not in _KNOWLEDGE_PROFILES:
+        raise ValueError(
+            f"profile must be one of: {', '.join(list_knowledge_profiles())}"
+        )
+
+    p = _KNOWLEDGE_PROFILES[name]
+    KNOWLEDGE_PROFILE = name
+    BUSINESS_NAME = p["business_name"]
+    BUSINESS_WEBSITE = p["website"]
+    BUSINESS_CONTEXT_FILE = p["file"]
+    GREETING = p["greeting"]
+    OUTBOUND_GREETING = p["outbound_greeting"]
+    SYSTEM_PROMPT_BASE = p["system_prompt"]
+    SYSTEM_PROMPT = SYSTEM_PROMPT_BASE
+    return KNOWLEDGE_PROFILE
+
+
+def set_knowledge_profile(profile: str) -> str:
+    """Switch knowledge base without restart. Returns normalized profile id."""
+    return apply_knowledge_profile(profile)
+
+
+# Apply profile from .env at import (named profiles override BUSINESS_* for that mode)
+if KNOWLEDGE_PROFILE in _KNOWLEDGE_PROFILES:
+    apply_knowledge_profile(KNOWLEDGE_PROFILE)
 
 # Hang-up rules
 SILENCE_TIMEOUT_SEC = float(os.getenv("SILENCE_TIMEOUT_SEC", "45"))

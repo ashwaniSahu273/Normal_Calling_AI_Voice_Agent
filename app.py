@@ -64,6 +64,8 @@ async def health() -> dict[str, str | bool]:
         "status": "ok",
         "ai": config.AI_PROVIDER,
         "telephony": config.TELEPHONY_PROVIDER,
+        "knowledge_profile": config.KNOWLEDGE_PROFILE,
+        "business_name": config.BUSINESS_NAME,
         "agent_first": config.AGENT_FIRST_ENABLED and bool(config.HUMAN_AGENT_NUMBER),
         "human_handover": config.HUMAN_HANDOVER_MODE,
         "human_transfer": bool(config.HUMAN_AGENT_NUMBER),
@@ -110,6 +112,68 @@ async def set_handover_mode(request: Request) -> JSONResponse:
     log.info("Human handover mode set to %s", applied)
     return JSONResponse({"ok": True, "mode": applied})
 
+
+@app.get("/plivo/knowledge-profile")
+async def get_knowledge_profile() -> JSONResponse:
+    """Which knowledge base the AI uses (resiliencesoft | resiliohub | custom)."""
+    return JSONResponse(
+        {
+            "ok": True,
+            "profile": config.KNOWLEDGE_PROFILE,
+            "business_name": config.BUSINESS_NAME,
+            "website": config.BUSINESS_WEBSITE,
+            "knowledge_file": config.BUSINESS_CONTEXT_FILE,
+            "options": config.list_knowledge_profiles(),
+        }
+    )
+
+
+@app.post("/plivo/knowledge-profile")
+async def set_knowledge_profile(request: Request) -> JSONResponse:
+    """Switch knowledge base without restart. Header x-voice-secret. Body: {\"profile\":\"resiliohub\"}."""
+    if not _check_outbound_secret(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    profile = str(
+        body.get("profile") or body.get("mode") or request.query_params.get("profile") or ""
+    ).strip().lower()
+    try:
+        applied = config.set_knowledge_profile(profile)
+    except ValueError as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+                "profile": config.KNOWLEDGE_PROFILE,
+                "options": config.list_knowledge_profiles(),
+            },
+            status_code=400,
+        )
+    import knowledge
+
+    knowledge.load_business_knowledge(force=True)
+    config.SYSTEM_PROMPT = knowledge.build_system_prompt(force=True)
+    log.info(
+        "Knowledge profile set to %s (%s, file=%s)",
+        applied,
+        config.BUSINESS_NAME,
+        config.BUSINESS_CONTEXT_FILE,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "profile": applied,
+            "business_name": config.BUSINESS_NAME,
+            "website": config.BUSINESS_WEBSITE,
+            "knowledge_file": config.BUSINESS_CONTEXT_FILE,
+            "knowledge_chars": len(knowledge.load_business_knowledge()),
+        }
+    )
 
 async def _plivo_form_value_async(request: Request, *keys: str) -> str:
     for key in keys:

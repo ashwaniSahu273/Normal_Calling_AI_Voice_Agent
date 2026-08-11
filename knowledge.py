@@ -88,7 +88,12 @@ def load_business_knowledge(force: bool = False) -> str:
 
     _cached = "\n\n".join(parts).strip()
     if _cached:
-        log.info("Business knowledge loaded (%s chars)", len(_cached))
+        log.info(
+            "Business knowledge loaded profile=%s business=%s (%s chars)",
+            getattr(config, "KNOWLEDGE_PROFILE", "?"),
+            config.BUSINESS_NAME,
+            len(_cached),
+        )
     else:
         log.info("No business knowledge configured (set BUSINESS_CONTEXT / FILE / WEBSITE)")
     return _cached
