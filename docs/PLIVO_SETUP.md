@@ -421,7 +421,7 @@ Implemented in this repo. Demo steps + diagrams: **[FLOW.md](FLOW.md)** §12 (PO
 
 Plivo then hits the same Answer URL with `?direction=outbound&ctx=…`.
 
-**Human transfer** — AI calls `transfer_to_human` tool → Plivo redirects to `/plivo/transfer` → dials `HUMAN_AGENT_NUMBER`.
+**Human handover (default)** — AI calls `transfer_to_human` → missed-call ping to `HUMAN_AGENT_NUMBER` + WhatsApp “call back” → hang up AI call. Agent calls the customer on their own phone (no live Plivo transfer minutes). Set `HUMAN_HANDOVER_MODE=transfer` only if you want old live Dial connect.
 
 **Agent-first** — set `AGENT_FIRST_ENABLED=true` in `.env`; rings human before AI.
 

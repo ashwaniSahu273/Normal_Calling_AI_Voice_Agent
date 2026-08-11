@@ -76,11 +76,8 @@ TOOL_DEFS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "transfer_to_human",
-        "description": (
-            "Connect the caller to a live human agent. Use when they ask to speak with a person, "
-            "manager, sales executive, or real agent — or when you cannot help after trying lookup_knowledge. "
-            "Say ONE short line like 'I'll connect you to our team now', then call this tool immediately."
-        ),
+        "description": "",  # filled by live_tool_defs() from HUMAN_HANDOVER_MODE
+
         "parameters": {
             "type": "object",
             "properties": {
@@ -141,13 +138,49 @@ TOOL_DEFS: list[dict[str, Any]] = [
     },
 ]
 
+_TRANSFER_DESC = (
+    "Connect the caller to a live human agent. Use when they ask to speak with a person, "
+    "manager, sales executive, or real agent — or when you cannot help after lookup_knowledge. "
+    "Say ONE short line like 'I'll connect you to our team now', then call this tool immediately."
+)
+_CALLBACK_DESC = (
+    "Request a human callback when the caller asks for a person, manager, executive, "
+    "or real agent — or when you cannot help after lookup_knowledge. "
+    "Say ONE short line like 'I'll have a team member call you back shortly', "
+    "then call this tool immediately. Do NOT say you are connecting them live."
+)
+
+
+def live_tool_defs() -> list[dict[str, Any]]:
+    """Tool list with transfer_to_human text matching current HUMAN_HANDOVER_MODE."""
+    mode = (config.HUMAN_HANDOVER_MODE or "callback").strip().lower()
+    desc = _TRANSFER_DESC if mode == "transfer" else _CALLBACK_DESC
+    out: list[dict[str, Any]] = []
+    for item in TOOL_DEFS:
+        if item.get("name") == "transfer_to_human":
+            out.append({**item, "description": desc})
+        else:
+            out.append(item)
+    return out
+
 
 async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any]) -> str:
     if name == "transfer_to_human":
+        if (config.HUMAN_HANDOVER_MODE or "callback").strip().lower() == "transfer":
+            return json.dumps(
+                {
+                    "status": "transferring",
+                    "message": "Connecting caller to human agent.",
+                    "reason": arguments.get("reason") or "caller request",
+                }
+            )
         return json.dumps(
             {
-                "status": "transferring",
-                "message": "Connecting caller to human agent.",
+                "status": "callback_requested",
+                "message": (
+                    "A team member will call the customer back shortly. "
+                    "Tell the caller that clearly. Do not say you are connecting them now."
+                ),
                 "reason": arguments.get("reason") or "caller request",
             }
         )

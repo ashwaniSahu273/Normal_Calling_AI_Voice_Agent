@@ -69,6 +69,29 @@ async def create_outbound_call(
     return data
 
 
+async def create_missed_call_ping(to: str) -> dict[str, Any]:
+    """Ring `to` briefly then drop — missed-call alert. Almost no talk-time charge."""
+    from_number = (config.PLIVO_FROM_NUMBER or "").strip()
+    if not from_number:
+        raise RuntimeError("PLIVO_FROM_NUMBER is not configured")
+    ring = max(5, min(25, int(config.MISSED_CALL_RING_SEC)))
+    payload: dict[str, str] = {
+        "from": from_number,
+        "to": to.strip(),
+        "answer_url": _public_url("/plivo/missed-call"),
+        "answer_method": "POST",
+        "ring_timeout": str(ring),
+        "time_limit": "2",
+    }
+    api = f"{_BASE}/Account/{config.PLIVO_AUTH_ID}/Call/"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(api, data=payload, auth=_auth())
+        resp.raise_for_status()
+        data = resp.json()
+    log.info("Plivo missed-call ping to=%s request_uuid=%s ring=%ss", to, data.get("request_uuid"), ring)
+    return data
+
+
 async def redirect_call(call_uuid: str, answer_url: str, *, method: str = "GET") -> dict[str, Any]:
     """Redirect live call (Transfer API — end AI stream → dial human agent)."""
     api = f"{_BASE}/Account/{config.PLIVO_AUTH_ID}/Call/{call_uuid}/"

@@ -182,15 +182,28 @@ def build_system_prompt(*, force: bool = False) -> str:
         "- end_call summary: 2–3 sentences for the owner (topic, what you answered, next step)."
     )
 
-    handover_block = (
-        "HUMAN HANDOVER:\n"
-        "- If the caller asks for a person, human, manager, executive, or 'real agent', "
-        "say ONE short line ('I'll connect you to our team now') then call transfer_to_human.\n"
-        "- Use transfer_to_human when you tried lookup_knowledge but the issue needs a human "
-        "(custom pricing, contract, urgent complaint).\n"
-        "- Do NOT call transfer_to_human for simple FAQ you can answer from knowledge.\n"
-        "- Include a short summary in transfer_to_human so the human agent knows the context."
-    )
+    if (config.HUMAN_HANDOVER_MODE or "callback").strip().lower() == "transfer":
+        handover_block = (
+            "HUMAN HANDOVER:\n"
+            "- If the caller asks for a person, human, manager, executive, or 'real agent', "
+            "say ONE short line ('I'll connect you to our team now') then call transfer_to_human.\n"
+            "- Use transfer_to_human when you tried lookup_knowledge but the issue needs a human "
+            "(custom pricing, contract, urgent complaint).\n"
+            "- Do NOT call transfer_to_human for simple FAQ you can answer from knowledge.\n"
+            "- Include a short summary in transfer_to_human so the human agent knows the context."
+        )
+    else:
+        handover_block = (
+            "HUMAN HANDOVER (callback — do not live-connect):\n"
+            "- If the caller asks for a person, human, manager, executive, or 'real agent', "
+            "say ONE short line: 'I'll have a team member call you back shortly.' "
+            "Then call transfer_to_human immediately.\n"
+            "- NEVER say you are connecting / transferring / putting them through live.\n"
+            "- Use transfer_to_human when lookup_knowledge is not enough "
+            "(custom pricing, contract, urgent complaint).\n"
+            "- Do NOT call transfer_to_human for simple FAQ you can answer from knowledge.\n"
+            "- Include a short summary (topic + caller name if known) for the callback WhatsApp."
+        )
 
     chunks = [base, language_block, persona_block, listen_block, style_block, handover_block, hangup_block]
     if knowledge:

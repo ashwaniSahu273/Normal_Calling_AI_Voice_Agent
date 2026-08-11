@@ -9,7 +9,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 from bridge import run_bridge
-from plivo_xml import agent_first_xml, answer_xml, dial_fallback_xml, transfer_xml
+from plivo_xml import (
+    agent_first_xml,
+    answer_xml,
+    dial_fallback_xml,
+    missed_call_hangup_xml,
+    transfer_xml,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,8 +65,50 @@ async def health() -> dict[str, str | bool]:
         "ai": config.AI_PROVIDER,
         "telephony": config.TELEPHONY_PROVIDER,
         "agent_first": config.AGENT_FIRST_ENABLED and bool(config.HUMAN_AGENT_NUMBER),
+        "human_handover": config.HUMAN_HANDOVER_MODE,
         "human_transfer": bool(config.HUMAN_AGENT_NUMBER),
     }
+
+
+@app.get("/plivo/handover-mode")
+async def get_handover_mode() -> JSONResponse:
+    """Current human handover: callback (missed call + WhatsApp) or transfer (live pickup)."""
+    return JSONResponse(
+        {
+            "ok": True,
+            "mode": config.HUMAN_HANDOVER_MODE,
+            "options": {
+                "callback": "Missed call + WhatsApp. Agent calls customer back (no live Plivo minutes).",
+                "transfer": "Agent phone rings live. Pick up and talk (Plivo minutes on both legs).",
+            },
+        }
+    )
+
+
+@app.post("/plivo/handover-mode")
+async def set_handover_mode(request: Request) -> JSONResponse:
+    """Switch handover without restart. Header x-voice-secret. Body: {\"mode\":\"callback\"|\"transfer\"}."""
+    if not _check_outbound_secret(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    mode = str(body.get("mode") or request.query_params.get("mode") or "").strip().lower()
+    try:
+        applied = config.set_handover_mode(mode)
+    except ValueError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc), "mode": config.HUMAN_HANDOVER_MODE},
+            status_code=400,
+        )
+    import knowledge
+
+    config.SYSTEM_PROMPT = knowledge.build_system_prompt(force=True)
+    log.info("Human handover mode set to %s", applied)
+    return JSONResponse({"ok": True, "mode": applied})
 
 
 async def _plivo_form_value_async(request: Request, *keys: str) -> str:
@@ -196,9 +244,15 @@ async def plivo_dial_status(request: Request) -> PlainTextResponse:
     return PlainTextResponse(dial_fallback_xml(), media_type="application/xml")
 
 
+@app.api_route("/plivo/missed-call", methods=["GET", "POST"])
+async def plivo_missed_call(_request: Request) -> PlainTextResponse:
+    """Agent ping answer URL — hang up immediately (missed-call alert)."""
+    return PlainTextResponse(missed_call_hangup_xml(), media_type="application/xml")
+
+
 @app.api_route("/plivo/transfer", methods=["GET", "POST"])
 async def plivo_transfer(_request: Request) -> PlainTextResponse:
-    """Mid-call AI → human handover XML."""
+    """Live AI → human Dial (only when HUMAN_HANDOVER_MODE=transfer)."""
     if not config.HUMAN_AGENT_NUMBER:
         return PlainTextResponse(
             "HUMAN_AGENT_NUMBER is not configured", status_code=500

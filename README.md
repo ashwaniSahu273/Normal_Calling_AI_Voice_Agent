@@ -14,6 +14,7 @@ Caller → Plivo/Exotel → WebSocket → AI → tools → n8n → Sheets / What
 | **[docs/PRODUCT_MULTI_TENANT.md](docs/PRODUCT_MULTI_TENANT.md)** | **WhatsAppCRM feature** — Plivo reseller, KYC, numbers, is it possible? |
 | **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | Plivo step-by-step (KYC → number → first call) |
 | **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, voice, n8n, Sheets, troubleshooting |
+| **[docs/API_INTEGRATION.md](docs/API_INTEGRATION.md)** | **Node + Web + Flutter APIs** — request/response for full feature |
 | **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | ResilioHub Node backend, multi-tenant, product rollout |
 
 ## Quick start
@@ -58,6 +59,7 @@ data/business_knowledge.md
 n8n/voice_agent_actions.json
 docs/FLOW.md                 # Architecture (start here)
 docs/PRODUCT_MULTI_TENANT.md # Sell as WhatsAppCRM feature
+docs/API_INTEGRATION.md      # Backend + app API contract
 docs/PLIVO_SETUP.md
 docs/GUIDE.md
 docs/INTEGRATION.md

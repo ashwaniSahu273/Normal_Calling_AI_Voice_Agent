@@ -66,8 +66,33 @@ Copy structure from `.env.example`. Key groups:
 | Business | `BUSINESS_NAME`, `GREETING`, `data/business_knowledge.md` |
 | n8n | `N8N_WEBHOOK_URL`, `NOTIFY_WHATSAPP` |
 | Lifecycle | `SILENCE_TIMEOUT_SEC`, `MAX_CALL_DURATION_SEC`, `AI_RESPONSE_NUDGE_SEC` |
+| Human handover | `HUMAN_AGENT_NUMBER`, `HUMAN_HANDOVER_MODE=callback` or `transfer` |
 
-Restart `python app.py` after any `.env` change.
+Restart `python app.py` after any `.env` change (handover mode can also switch live — see below).
+
+### Human handover — both modes (easy switch)
+
+| Mode | What happens | Cost |
+|------|----------------|------|
+| **`callback`** (default) | Missed-call ping + WhatsApp. You call the customer back on your phone. | Almost no extra Plivo minutes |
+| **`transfer`** | Your phone rings **live**. Pick up and talk to the caller. | Plivo minutes on both legs |
+
+**Permanent:** set `HUMAN_HANDOVER_MODE` in `.env`, restart.
+
+**Instant (no restart):**
+
+```powershell
+# See current
+curl https://YOUR_HOST/plivo/handover-mode
+
+# Live pickup
+curl -X POST "https://YOUR_HOST/plivo/handover-mode" -H "Content-Type: application/json" -H "x-voice-secret: YOUR_SECRET" -d "{\"mode\":\"transfer\"}"
+
+# Back to missed-call + WhatsApp
+curl -X POST "https://YOUR_HOST/plivo/handover-mode" -H "Content-Type: application/json" -H "x-voice-secret: YOUR_SECRET" -d "{\"mode\":\"callback\"}"
+```
+
+Takes effect on the **next** call.
 
 ---
 

@@ -292,15 +292,32 @@ const narrative = narrateCall(topic, conversationFull, nextStep, outcome, args);
 summary = narrative || summary;
 if (poorSummary(summary)) summary = narrative;
 
-const waText = [
-  `📞 *${business} — Call*`,
-  `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,
-  `Caller: ${from || 'unknown'}`,
-  `Topic: ${inferTopic(topic, conversationFull.toLowerCase())}`,
-  `Next: ${nextStep}`,
-  '',
-  summary,
-].join('\n').trim();
+const ocLow = String(outcome || '').toLowerCase();
+const isCallback =
+  ocLow.includes('callback') ||
+  String(nextStep || '').toLowerCase().includes('call customer back');
+
+const waLines = isCallback
+  ? [
+      `⚠️ *${business} — CALL BACK NOW*`,
+      `Customer: ${from || 'unknown'}`,
+      `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,
+      `Topic: ${inferTopic(topic, conversationFull.toLowerCase())}`,
+      '',
+      summary,
+      '',
+      `Please call the customer back on ${from || 'the number above'} (not via Plivo).`,
+    ]
+  : [
+      `📞 *${business} — Call*`,
+      `${date}${timeIst ? ' · ' + timeIst : ''} · ${duration}`,
+      `Caller: ${from || 'unknown'}`,
+      `Topic: ${inferTopic(topic, conversationFull.toLowerCase())}`,
+      `Next: ${nextStep}`,
+      '',
+      summary,
+    ];
+const waText = waLines.join('\n').trim();
 
 const waBody = notify
   ? {

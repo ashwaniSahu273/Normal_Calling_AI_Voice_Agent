@@ -125,15 +125,31 @@ PLIVO_AUTH_TOKEN = os.getenv("PLIVO_AUTH_TOKEN", "").strip()
 # E.164 caller ID for outbound, e.g. +912264233283
 PLIVO_FROM_NUMBER = os.getenv("PLIVO_FROM_NUMBER", "").strip()
 
-# Human agent mobile/landline (E.164) for transfer + agent-first ring
+# Human agent mobile/landline (E.164) for callback ping / live transfer / agent-first
 HUMAN_AGENT_NUMBER = os.getenv("HUMAN_AGENT_NUMBER", "").strip()
+# callback = missed-call ping + WhatsApp, agent calls customer back (no live Plivo minutes)
+# transfer = old live Dial connect (billed per minute on both legs)
+HUMAN_HANDOVER_MODE = (os.getenv("HUMAN_HANDOVER_MODE", "callback") or "callback").strip().lower()
+_HANDOVER_MODES = ("callback", "transfer")
+
+
+def set_handover_mode(mode: str) -> str:
+    """Switch human handover without restart. Returns normalized mode."""
+    global HUMAN_HANDOVER_MODE
+    mode = (mode or "").strip().lower()
+    if mode not in _HANDOVER_MODES:
+        raise ValueError("mode must be 'callback' or 'transfer'")
+    HUMAN_HANDOVER_MODE = mode
+    return HUMAN_HANDOVER_MODE
+# How long Plivo rings the agent for the missed-call ping before giving up
+MISSED_CALL_RING_SEC = int(os.getenv("MISSED_CALL_RING_SEC", "12"))
 # Ring human before AI on inbound (requires HUMAN_AGENT_NUMBER + Plivo creds)
 AGENT_FIRST_ENABLED = os.getenv("AGENT_FIRST_ENABLED", "false").lower() in ("1", "true", "yes")
 AGENT_FIRST_TIMEOUT_SEC = int(os.getenv("AGENT_FIRST_TIMEOUT_SEC", "25"))
 AGENT_FIRST_ANNOUNCEMENT = os.getenv("AGENT_FIRST_ANNOUNCEMENT", "").strip()
 AGENT_FALLBACK_ANNOUNCEMENT = os.getenv("AGENT_FALLBACK_ANNOUNCEMENT", "").strip()
 TRANSFER_ANNOUNCEMENT = os.getenv("TRANSFER_ANNOUNCEMENT", "").strip()
-# Seconds to let AI finish "connecting you…" before Plivo redirect
+# Seconds to let AI finish spoken line before hangup / redirect
 TRANSFER_GRACE_SEC = float(os.getenv("TRANSFER_GRACE_SEC", "3.0"))
 
 # Protect POST /plivo/outbound (header x-voice-secret or Bearer token)

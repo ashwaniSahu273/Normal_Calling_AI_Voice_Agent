@@ -21,7 +21,7 @@ from provider_base import (
     TranscriptDelta,
     TurnComplete,
 )
-from tools import TOOL_DEFS
+from tools import live_tool_defs
 
 log = logging.getLogger("voice-agent.gemini")
 
@@ -76,7 +76,7 @@ def _gemini_tools() -> list[types.Tool]:
             description=t.get("description", ""),
             parameters=_to_gemini_schema(t.get("parameters", {"type": "object"})),
         )
-        for t in TOOL_DEFS
+        for t in live_tool_defs()
     ]
     return [types.Tool(function_declarations=declarations)]
 

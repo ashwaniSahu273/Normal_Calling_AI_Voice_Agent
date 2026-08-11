@@ -208,32 +208,39 @@ flowchart TD
 
 ---
 
-## 6. Human handover (AI → real person)
+## 6. Human handover (callback — default)
 
-During AI call, caller says *“connect me to a person”*.
+Caller says *“connect me to a person”*. **We do not live-connect** (that would bill Plivo minutes on both legs).
+
+Default `HUMAN_HANDOVER_MODE=callback`:
 
 ```mermaid
 sequenceDiagram
   participant U as Caller
   participant B as bridge.py
   participant G as Gemini
-  participant PC as plivo_client.py
-  participant P as Plivo API
-  participant T as /plivo/transfer
+  participant N as n8n / WhatsApp
+  participant P as Plivo
   participant H as Human mobile
 
   U->>G: I want a real person
+  G->>U: A team member will call you back shortly
   G->>B: tool transfer_to_human
-  B->>B: Log call_ended (outcome=transferred)
-  B->>PC: redirect_call(CallUUID, /plivo/transfer)
-  PC->>P: Transfer API aleg_url=…
-  P->>T: Fetch new XML
-  T-->>P: Speak + Dial HUMAN_AGENT_NUMBER
-  P->>H: Ring
-  H->>U: Live conversation
+  B->>N: human_callback + call_ended WhatsApp
+  B->>P: short outbound ping to HUMAN_AGENT_NUMBER
+  P->>H: Rings ~12s then drops (missed call)
+  B->>U: Hang up AI call
+  H->>U: Agent calls customer back on their own phone
 ```
 
-**Important:** After transfer, Plivo **leaves** the WebSocket stream and follows new XML. AI session ends; human leg is billed as a normal Plivo call.
+- Missed call = alert only (`/plivo/missed-call` → Hangup if they pick up). Almost no talk-time.
+- WhatsApp to `NOTIFY_WHATSAPP` includes **CALL BACK NOW** + customer number.
+- Customer–agent conversation happens **off Plivo** → no extra per-minute charge.
+
+Switch anytime (next call uses new mode):
+
+- `.env` `HUMAN_HANDOVER_MODE=callback` or `transfer` + restart  
+- or `POST /plivo/handover-mode` `{"mode":"transfer"}` with `x-voice-secret` (no restart)
 
 ---
 
@@ -303,7 +310,7 @@ flowchart TD
   G[Gemini decides] --> T[tools.py dispatch_tool]
   T -->|create_lead / book_appointment / …| N[n8n webhook]
   T -->|lookup_knowledge| K[knowledge.search_knowledge local RAG]
-  T -->|transfer_to_human| L[Handled in bridge — Plivo redirect]
+  T -->|transfer_to_human| L[bridge — callback ping + WhatsApp, hang up]
   T -->|end_call| H[bridge schedules hangup]
   B[bridge call_ended] --> N
   N --> S1[voice_calls sheet]
@@ -376,7 +383,8 @@ PLIVO_AUTH_ID=...                       # outbound + transfer only
 PLIVO_AUTH_TOKEN=...
 PLIVO_FROM_NUMBER=+91...
 
-HUMAN_AGENT_NUMBER=+91...               # transfer / agent-first
+HUMAN_AGENT_NUMBER=+91...               # callback ping / agent-first
+HUMAN_HANDOVER_MODE=callback            # callback | transfer
 AGENT_FIRST_ENABLED=false
 OUTBOUND_API_SECRET=...                 # protects POST /plivo/outbound
 
@@ -390,6 +398,7 @@ wss://{PUBLIC_HOST}/plivo/stream?...
 https://{PUBLIC_HOST}/plivo/stream-status
 https://{PUBLIC_HOST}/plivo/dial-status
 https://{PUBLIC_HOST}/plivo/transfer
+https://{PUBLIC_HOST}/plivo/missed-call
 ```
 
 If `PUBLIC_HOST` is wrong or tunnel dies → Answer URL 404 / busy tone / stream drop.
@@ -404,11 +413,12 @@ If `PUBLIC_HOST` is wrong or tunnel dies → Answer URL 404 / busy tone / stream
 2. Ask about services (English or Hindi).  
 3. Say thanks → call ends → Sheet + WhatsApp.
 
-### B) Human handover
+### B) Human handover (callback)
 
 1. During call: *“I want to talk to a person.”*  
-2. Your `HUMAN_AGENT_NUMBER` rings.  
-3. Sheet outcome: transferred.
+2. AI says a team member will call back → AI call hangs up.  
+3. Your phone gets a short missed-call ping + WhatsApp with customer number.  
+4. You call the customer back on your own phone. Sheet: callback requested.
 
 ### C) Outbound
 
@@ -447,7 +457,7 @@ Set `AGENT_FIRST_ENABLED=true`, restart, inbound call rings you first; ignore �
 | Busy / invalid / 404 on answer | `PUBLIC_HOST`, trailing space in Plivo Answer URL, tunnel up |
 | No AI voice | `/plivo/stream` connect? Gemini key? logs `Bridge established` |
 | Empty caller in Sheet | Logs: `Plivo answer … from=` and `Caller from call_meta` |
-| Transfer no ring | `PLIVO_AUTH_*`, `HUMAN_AGENT_NUMBER`, Transfer API logs |
+| No missed-call / WhatsApp on “real person” | `HUMAN_AGENT_NUMBER`, `NOTIFY_WHATSAPP`, `HUMAN_HANDOVER_MODE=callback`, n8n reimport |
 | Outbound cuts on answer | Restart after latest XML/`ctx` fixes; watch stream-status errors |
 
 Health: `GET https://YOUR_HOST/health`

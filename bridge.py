@@ -255,21 +255,28 @@ class CallBridge:
 
         self._hangup_task = asyncio.create_task(_do(), name="hangup")
 
-    async def _request_transfer(self, summary: str = "") -> None:
+    async def _request_transfer(self, summary: str = "", reason: str = "") -> None:
+        """Human handover: default = callback (missed call + WhatsApp). Optional live transfer."""
         if self._transfer_pending:
             return
         if not config.HUMAN_AGENT_NUMBER:
             log.error("transfer_to_human requested but HUMAN_AGENT_NUMBER is not set")
             return
         self._transfer_pending = True
-        self._end_reason = "transferred"
-        self._follow_up = "human_agent"
         if summary:
             self._end_summary = summary
         elif not self._end_summary:
             self._end_summary = self._fallback_summary()
 
-        async def _do() -> None:
+        mode = (config.HUMAN_HANDOVER_MODE or "callback").strip().lower()
+        if mode != "transfer":
+            await self._request_human_callback(reason=reason)
+            return
+
+        self._end_reason = "transferred"
+        self._follow_up = "human_agent"
+
+        async def _do_live() -> None:
             await asyncio.sleep(config.TRANSFER_GRACE_SEC)
             try:
                 await self._notify_call_ended()
@@ -295,7 +302,55 @@ class CallBridge:
             except Exception:  # noqa: BLE001
                 pass
 
-        self._hangup_task = asyncio.create_task(_do(), name="transfer")
+        self._hangup_task = asyncio.create_task(_do_live(), name="transfer")
+
+    async def _request_human_callback(self, reason: str = "") -> None:
+        """No live connect. Ping agent + WhatsApp; hang up customer. Agent calls back off-Plivo."""
+        self._end_reason = "callback_requested"
+        self._follow_up = "human_callback"
+        caller = self.caller or ""
+
+        async def _do_callback() -> None:
+            await asyncio.sleep(config.TRANSFER_GRACE_SEC)
+            try:
+                from tools import call_n8n
+
+                await call_n8n(
+                    "human_callback",
+                    {
+                        "reason": reason or "caller requested a human",
+                        "summary": self._end_summary or "",
+                        "caller": caller,
+                        "agent_number": config.HUMAN_AGENT_NUMBER,
+                    },
+                    {
+                        "call_id": self._stable_call_id(),
+                        "from": caller,
+                        "direction": self._direction,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("human_callback n8n notify failed")
+            try:
+                from plivo_client import configured, create_missed_call_ping
+
+                if configured() and config.HUMAN_AGENT_NUMBER:
+                    await create_missed_call_ping(config.HUMAN_AGENT_NUMBER)
+                else:
+                    log.warning("Missed-call ping skipped — Plivo not configured")
+            except Exception:  # noqa: BLE001
+                log.exception("Missed-call ping to agent failed")
+            try:
+                await self._notify_call_ended()
+            except Exception:  # noqa: BLE001
+                log.exception("Failed to log call after human callback")
+            self._closing = True
+            try:
+                await self.tel_ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        self._hangup_task = asyncio.create_task(_do_callback(), name="human-callback")
 
     async def _on_caller_farewell(self, text: str) -> None:
         if self._closing or self._farewell_pending:
@@ -684,8 +739,12 @@ class CallBridge:
             reason = str(call.arguments.get("reason") or "caller request")
             self._caller_intent = reason
             self._farewell_pending = True
-            log.info("transfer_to_human reason=%s", reason)
-            await self._request_transfer(summary=summary)
+            log.info(
+                "transfer_to_human mode=%s reason=%s",
+                config.HUMAN_HANDOVER_MODE,
+                reason,
+            )
+            await self._request_transfer(summary=summary, reason=reason)
             return
 
         if call.name == "book_appointment":
@@ -739,6 +798,7 @@ class CallBridge:
             "max_duration": "Max call time reached",
             "hangup": "Caller hung up",
             "transferred": "Transferred to human agent",
+            "callback_requested": "Callback requested — agent will call back",
             "other": "Ended",
         }
         return mapping.get(self._end_reason, self._end_reason or "Ended")

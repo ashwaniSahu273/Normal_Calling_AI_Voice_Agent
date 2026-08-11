@@ -13,7 +13,7 @@ import audio
 import config
 import knowledge
 from provider_base import AudioDelta, ProviderEvent, RealtimeProvider, SpeechStarted, ToolCall
-from tools import TOOL_DEFS
+from tools import live_tool_defs
 
 log = logging.getLogger("voice-agent.openai")
 
@@ -46,7 +46,7 @@ class OpenAIRealtimeProvider(RealtimeProvider):
                         "input_audio_format": config.OPENAI_AUDIO_FORMAT,
                         "output_audio_format": config.OPENAI_AUDIO_FORMAT,
                         "turn_detection": {"type": "server_vad"},
-                        "tools": TOOL_DEFS,
+                        "tools": live_tool_defs(),
                         "tool_choice": "auto",
                     },
                 }

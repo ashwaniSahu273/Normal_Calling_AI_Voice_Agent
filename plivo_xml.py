@@ -83,6 +83,11 @@ def dial_fallback_xml() -> str:
     )
 
 
+def missed_call_hangup_xml() -> str:
+    """Answer URL for agent ping — hang up immediately if they pick up."""
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Hangup/>\n</Response>\n'
+
+
 def transfer_xml() -> str:
     """Mid-call handover — dial human agent."""
     agent = (config.HUMAN_AGENT_NUMBER or "").strip()

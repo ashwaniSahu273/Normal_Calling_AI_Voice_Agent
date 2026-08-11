@@ -587,6 +587,8 @@ def sheet_next_step_label(
     mapping = {
         "appointment": "Appointment noted",
         "callback": "Callback needed",
+        "human_callback": "Call customer back now",
+        "human_agent": "Call customer back now",
         "team_notified": "Team notified",
         "none": "None",
     }
