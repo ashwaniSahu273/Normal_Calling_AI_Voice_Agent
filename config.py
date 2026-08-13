@@ -11,7 +11,7 @@ load_dotenv()
 _ROOT = Path(__file__).resolve().parent
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().lower()
-TELEPHONY_PROVIDER = os.getenv("TELEPHONY_PROVIDER", "exotel").strip().lower()
+TELEPHONY_PROVIDER = os.getenv("TELEPHONY_PROVIDER", "plivo").strip().lower()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview").strip()
@@ -30,6 +30,10 @@ PUBLIC_HOST = os.getenv("PUBLIC_HOST", "").strip()
 PORT = int(os.getenv("PORT", "5000"))
 
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
+
+# ResilioHub Node (optional). Empty = Sheets/n8n + local .env knowledge only.
+BACKEND_URL = os.getenv("BACKEND_URL", "").strip().rstrip("/")
+BACKEND_SECRET = os.getenv("BACKEND_SECRET", "").strip()
 
 # WhatsApp notify number for call summaries (digits, with country code e.g. 91XXXXXXXXXX)
 NOTIFY_WHATSAPP = os.getenv("NOTIFY_WHATSAPP", "").strip()
@@ -211,7 +215,7 @@ KNOWLEDGE_SEARCH_LOCAL_FIRST = os.getenv("KNOWLEDGE_SEARCH_LOCAL_FIRST", "true")
     "true",
     "yes",
 )
-KNOWLEDGE_SEARCH_MAX_CHARS = int(os.getenv("KNOWLEDGE_SEARCH_MAX_CHARS", "2000"))
+KNOWLEDGE_SEARCH_MAX_CHARS = int(os.getenv("KNOWLEDGE_SEARCH_MAX_CHARS", "3200"))
 
 # Plivo REST (outbound + mid-call transfer) — Console → Account → Auth ID / Auth Token
 PLIVO_AUTH_ID = os.getenv("PLIVO_AUTH_ID", "").strip()

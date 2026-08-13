@@ -76,6 +76,10 @@ class RealtimeProvider(abc.ABC):
         """Optional: why this outbound call was placed."""
         return
 
+    def set_tenant_overlay(self, overlay: dict | None) -> None:
+        """Optional: per-call Node tenant (greeting, knowledge, business name)."""
+        return
+
     async def refresh_session(self, digest: str = "") -> None:
         """Optional: soft-reset AI session mid-call (latency / context trim)."""
         return

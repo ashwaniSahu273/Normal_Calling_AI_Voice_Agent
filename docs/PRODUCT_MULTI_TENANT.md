@@ -364,7 +364,8 @@ Do **not** jump to Phase 2 before 2–3 paid pilots succeed in Phase 1.
 Related project docs:
 
 - Architecture & URL flow: [FLOW.md](FLOW.md)  
-- Backend integration notes: [INTEGRATION.md](INTEGRATION.md)  
+- Deploy next to Node: [DEPLOY.md](DEPLOY.md)  
+- Node + app APIs: [API_INTEGRATION.md](API_INTEGRATION.md)  
 - Plivo console setup (single business): [PLIVO_SETUP.md](PLIVO_SETUP.md)
 
 ---

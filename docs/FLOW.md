@@ -7,7 +7,8 @@
 | **This file (`FLOW.md`)** | Understand architecture, URLs, files, call flows |
 | [PLIVO_SETUP.md](PLIVO_SETUP.md) | Buy number, console clicks, first inbound call |
 | [GUIDE.md](GUIDE.md) | `.env`, voice, n8n Sheets, troubleshooting |
-| [INTEGRATION.md](INTEGRATION.md) | ResilioHub Node backend / multi-tenant product |
+| [DEPLOY.md](DEPLOY.md) | Run next to Node + nginx |
+| [API_INTEGRATION.md](API_INTEGRATION.md) | Node / Web / Flutter APIs |
 
 ---
 
@@ -16,7 +17,7 @@
 ```
 Phone (Plivo)  ←audio→  Your Python bridge  ←speech→  Gemini Live
                               ↓ tools
-                            n8n → Sheets + WhatsApp
+                     n8n (Sheets/WA)  and/or  Node (DB)
 ```
 
 You put **one** public URL in Plivo console: **`/plivo/answer`**.  
@@ -348,7 +349,8 @@ Set `N8N_WEBHOOK_URL` in `.env` to the **Production** webhook URL from n8n.
 | `provider_gemini.py` | Gemini Live implementation |
 | `provider_openai.py` | OpenAI Realtime (optional) |
 | `knowledge.py` | Company knowledge + system / outbound prompts + local RAG |
-| `tools.py` | Tool schemas + n8n HTTP |
+| `tools.py` | Tool schemas + n8n / Node HTTP |
+| `backend.py` | Optional ResilioHub Node: tenant-config + call-ended |
 | `call_digest.py` | Transcript merge, summaries, farewell heuristics |
 
 ### Data & automation
@@ -360,16 +362,17 @@ Set `N8N_WEBHOOK_URL` in `.env` to the **Production** webhook URL from n8n.
 | `requirements.txt` | Python deps |
 | `n8n/` | Workflow + sheet headers + build_call_log.js |
 | `scripts/sync_n8n_workflow.py` | Push JS into workflow JSON |
-| `scripts/generate_flow_pdf.py` | Optional PDF regen |
+| `Dockerfile` | Production image |
 
-### Docs (keep these four)
+### Docs
 
 | Doc | Audience |
 |-----|----------|
 | **FLOW.md** (this) | How URLs + files connect |
+| **DEPLOY.md** | VPS + nginx + Node hook |
 | **PLIVO_SETUP.md** | Console setup after KYC |
 | **GUIDE.md** | Day-to-day ops + troubleshooting |
-| **INTEGRATION.md** | Product / Node / multi-tenant |
+| **API_INTEGRATION.md** | Node / Web / Flutter contract |
 
 ---
 

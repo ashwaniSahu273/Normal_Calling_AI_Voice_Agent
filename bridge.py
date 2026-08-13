@@ -46,6 +46,8 @@ class CallBridge:
         telephony: str,
         direction: str = "inbound",
         caller: str | None = None,
+        called: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.tel_ws = tel_ws
         self.telephony = telephony
@@ -53,6 +55,13 @@ class CallBridge:
         self.stream_id: str | None = None
         self.call_id: str | None = None
         self.caller: str | None = self._normalize_phone(caller)
+        self._called = self._normalize_phone(called) or ""
+        self._tenant_id = str(tenant_id or "").strip()
+        self._tenant_overlay: dict = {}
+        self._knowledge_text = ""
+        self._human_agent = (config.HUMAN_AGENT_NUMBER or "").strip()
+        self._notify_whatsapp = (config.NOTIFY_WHATSAPP or "").strip()
+        self._business_name = (config.BUSINESS_NAME or "").strip()
         self._closing = False
         self._call_logged = False
         self._transfer_pending = False
@@ -143,12 +152,36 @@ class CallBridge:
             return True
         return False
 
+    async def _load_tenant(self) -> None:
+        """Pull per-business settings from Node if BACKEND_URL is set."""
+        from backend import get_tenant_config
+
+        row = await get_tenant_config(number=self._called, tenant_id=self._tenant_id)
+        if not row:
+            return
+        self._tenant_overlay = row
+        if row.get("tenant_id") is not None:
+            self._tenant_id = str(row.get("tenant_id"))
+        if row.get("knowledge_text"):
+            self._knowledge_text = str(row["knowledge_text"]).strip()
+        if row.get("human_agent_number"):
+            self._human_agent = str(row["human_agent_number"]).strip()
+        if row.get("notify_whatsapp"):
+            self._notify_whatsapp = str(row["notify_whatsapp"]).strip()
+        if row.get("business_name"):
+            self._business_name = str(row["business_name"]).strip()
+        if row.get("phone_number") and not self._called:
+            self._called = self._normalize_phone(str(row["phone_number"])) or self._called
+
     async def run(self) -> None:
         await self.tel_ws.accept()
+        await self._load_tenant()
         self.provider = make_provider()
         self.provider.set_call_direction(self._direction)
         if self._followup_purpose:
             self.provider.set_followup_purpose(self._followup_purpose)
+        if self._tenant_overlay:
+            self.provider.set_tenant_overlay(self._tenant_overlay)
 
         # Read Plivo WebSocket immediately — waiting for Gemini first drops outbound calls.
         tel_task = asyncio.create_task(self._telephony_to_provider(), name="tel->ai")
@@ -259,8 +292,8 @@ class CallBridge:
         """Human handover: default = callback (missed call + WhatsApp). Optional live transfer."""
         if self._transfer_pending:
             return
-        if not config.HUMAN_AGENT_NUMBER:
-            log.error("transfer_to_human requested but HUMAN_AGENT_NUMBER is not set")
+        if not self._human_agent:
+            log.error("transfer_to_human requested but no human agent number")
             return
         self._transfer_pending = True
         if summary:
@@ -287,9 +320,12 @@ class CallBridge:
                     from plivo_client import configured, redirect_call
 
                     if configured():
+                        from urllib.parse import quote
+
+                        agent_qs = quote(self._human_agent)
                         await redirect_call(
                             self.call_id,
-                            f"https://{config.PUBLIC_HOST.rstrip('/')}/plivo/transfer",
+                            f"https://{config.PUBLIC_HOST.rstrip('/')}/plivo/transfer?agent={agent_qs}",
                         )
                         self._closing = True
                         return
@@ -321,7 +357,7 @@ class CallBridge:
                         "reason": reason or "caller requested a human",
                         "summary": self._end_summary or "",
                         "caller": caller,
-                        "agent_number": config.HUMAN_AGENT_NUMBER,
+                        "agent_number": self._human_agent,
                     },
                     {
                         "call_id": self._stable_call_id(),
@@ -334,8 +370,8 @@ class CallBridge:
             try:
                 from plivo_client import configured, create_missed_call_ping
 
-                if configured() and config.HUMAN_AGENT_NUMBER:
-                    await create_missed_call_ping(config.HUMAN_AGENT_NUMBER)
+                if configured() and self._human_agent:
+                    await create_missed_call_ping(self._human_agent)
                 else:
                     log.warning("Missed-call ping skipped — Plivo not configured")
             except Exception:  # noqa: BLE001
@@ -719,7 +755,15 @@ class CallBridge:
         assert self.provider is not None
         log.info("Tool call: %s(%s)", call.name, call.arguments)
         ctx = {"call_id": self._stable_call_id(), "from": self.caller}
-        payload_ctx = {**ctx, "direction": self._direction, "language": detect_language_hint(self._transcript)}
+        payload_ctx = {
+            **ctx,
+            "direction": self._direction,
+            "language": detect_language_hint(self._transcript),
+            "tenant_id": self._tenant_id,
+            "knowledge_text": self._knowledge_text,
+            "notify_whatsapp": self._notify_whatsapp,
+            "business_name": self._business_name,
+        }
         result = await dispatch_tool(call.name, call.arguments, payload_ctx)
         await self.provider.send_tool_result(call.call_id, call.name, result)
 
@@ -868,18 +912,31 @@ class CallBridge:
             "outcome": outcome,
             "conversation_full": conversation_full,
             "transcript_turns": transcript_turns,
-            "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
+            "notify_whatsapp": self._notify_whatsapp or None,
             "direction": self._direction,
+            "tenant_id": self._tenant_id or None,
+            "called": self._called or None,
+            "business_name": self._business_name or None,
         }
         ctx = {
             "call_id": self._stable_call_id(),
             "from": self.caller,
             "direction": self._direction,
+            "tenant_id": self._tenant_id,
+            "knowledge_text": self._knowledge_text,
+            "notify_whatsapp": self._notify_whatsapp,
+            "business_name": self._business_name,
         }
         try:
             await call_n8n("call_ended", args, ctx)
         except Exception:  # noqa: BLE001
             log.exception("Failed to post call_ended to n8n")
+        try:
+            from backend import post_call_ended
+
+            await post_call_ended(args)
+        except Exception:  # noqa: BLE001
+            log.exception("Failed to post call_ended to Node")
 
     async def _teardown(self) -> None:
         if self._closing:
@@ -908,9 +965,18 @@ async def run_bridge(
     direction: str = "inbound",
     caller: str | None = None,
     purpose: str | None = None,
+    called: str | None = None,
+    tenant_id: str | None = None,
 ) -> None:
     tel = (telephony or config.TELEPHONY_PROVIDER).lower()
-    bridge = CallBridge(ws, telephony=tel, direction=direction, caller=caller)
+    bridge = CallBridge(
+        ws,
+        telephony=tel,
+        direction=direction,
+        caller=caller,
+        called=called,
+        tenant_id=tenant_id,
+    )
     if purpose:
         bridge._followup_purpose = purpose.strip()
     await bridge.run()

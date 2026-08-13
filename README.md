@@ -1,23 +1,25 @@
 # AI Voice Receptionist — Core Bridge
 
-Phone audio (Plivo or Exotel) ↔ Gemini Live (or OpenAI Realtime) ↔ n8n business actions.
+Phone audio (Plivo) ↔ Gemini Live ↔ n8n / ResilioHub Node.
 
 ```
-Caller → Plivo/Exotel → WebSocket → AI → tools → n8n → Sheets / WhatsApp
+Caller → Plivo → Python (:5000) → Gemini
+                    ↓
+              n8n (Sheets/WA)  and/or  Node (DB + web/Flutter)
 ```
 
-## Documentation
+## Docs
 
-| Doc | For |
+| Doc | Use |
 |-----|-----|
-| **[docs/FLOW.md](docs/FLOW.md)** | **How it works** — diagrams, why only `/plivo/answer` in console, all URLs + files |
-| **[docs/PRODUCT_MULTI_TENANT.md](docs/PRODUCT_MULTI_TENANT.md)** | **WhatsAppCRM feature** — Plivo reseller, KYC, numbers, is it possible? |
-| **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | Plivo step-by-step (KYC → number → first call) |
-| **[docs/GUIDE.md](docs/GUIDE.md)** | Setup, env, voice, n8n, Sheets, troubleshooting |
-| **[docs/API_INTEGRATION.md](docs/API_INTEGRATION.md)** | **Node + Web + Flutter APIs** — request/response for full feature |
-| **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | ResilioHub Node backend, multi-tenant, product rollout |
+| **[docs/DEPLOY.md](docs/DEPLOY.md)** | **Upload next to Node** — nginx, env, Docker |
+| **[docs/API_INTEGRATION.md](docs/API_INTEGRATION.md)** | Node + Web + Flutter API contract |
+| **[docs/FLOW.md](docs/FLOW.md)** | How `/plivo/answer` connects to stream/tools |
+| **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | Plivo console after KYC |
+| **[docs/GUIDE.md](docs/GUIDE.md)** | `.env`, voice, n8n, troubleshooting |
+| **[docs/PRODUCT_MULTI_TENANT.md](docs/PRODUCT_MULTI_TENANT.md)** | Later: reseller / KYC / numbers |
 
-## Quick start
+## Quick start (dev)
 
 ```bash
 python -m venv .venv
@@ -27,46 +29,30 @@ cp .env.example .env
 python app.py
 ```
 
-Dev tunnel: `cloudflared tunnel --url http://localhost:5000` → set `PUBLIC_HOST` in `.env`.
+Tunnel: `cloudflared tunnel --url http://localhost:5000` → `PUBLIC_HOST` (no `https://`).
 
-**Understand the system:** open **[docs/FLOW.md](docs/FLOW.md)** first.
+## Production (with ResilioHub)
 
-## Providers (`.env`)
+1. Run Python on `:5000` (pm2 or Docker).
+2. nginx: `/plivo/` + `/health` → `:5000`, rest → Node `:3000`.
+3. Plivo Answer URL: `https://resiliohub.com/plivo/answer`.
+4. When Node internal APIs exist, set `BACKEND_URL` + `BACKEND_SECRET`.
 
-| Layer | Options | SaaS default |
-|-------|---------|--------------|
-| AI | `gemini` / `openai` | `gemini` |
-| Telephony | `plivo` / `exotel` | `plivo` (global) |
+Details: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
-Flip `TELEPHONY_PROVIDER` and restart — no code change.
-
-## Project layout
+## Layout
 
 ```
-app.py              # HTTP + WebSocket routes
-bridge.py           # Call switchboard
-plivo_xml.py        # Plivo XML (Stream / Dial / transfer)
-plivo_client.py     # Outbound + transfer REST
-call_meta.py        # Caller phone cache
-outbound_ctx.py     # Outbound purpose cache
-provider_gemini.py  # Gemini Live
-knowledge.py        # Prompts + RAG
-tools.py            # n8n tools
-call_digest.py      # Summaries
-audio.py            # Codecs
-
-data/business_knowledge.md
-n8n/voice_agent_actions.json
-docs/FLOW.md                 # Architecture (start here)
-docs/PRODUCT_MULTI_TENANT.md # Sell as WhatsAppCRM feature
-docs/API_INTEGRATION.md      # Backend + app API contract
-docs/PLIVO_SETUP.md
-docs/GUIDE.md
-docs/INTEGRATION.md
+app.py              HTTP + WebSocket (Plivo)
+backend.py          Node client (tenant-config, call-ended)
+bridge.py           Call switchboard
+plivo_xml.py / plivo_client.py
+knowledge.py        Prompts + RAG
+tools.py            AI tools → n8n + Node
+data/*.md           Knowledge bases
+n8n/                Optional Sheets/WhatsApp workflow
+Dockerfile
+docs/DEPLOY.md
 ```
 
-## n8n
-
-Import `n8n/voice_agent_actions.json`, activate, set `N8N_WEBHOOK_URL` in `.env`.
-
-Sheet headers: `n8n/*_headers.csv`.
+Leave `BACKEND_URL` empty until Node `GET /api/internal/voice/tenant-config` is ready. Voice still runs on `.env` + n8n.

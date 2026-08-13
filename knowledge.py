@@ -99,6 +99,38 @@ def load_business_knowledge(force: bool = False) -> str:
     return _cached
 
 
+def knowledge_for_prompt(full: str | None = None) -> str:
+    """
+    Slice for Gemini Live system prompt — keep small for latency.
+    Prefer ## CORE section; otherwise truncate. Full file stays in load_business_knowledge for RAG.
+    """
+    corpus = (full if full is not None else load_business_knowledge()).strip()
+    if not corpus:
+        return ""
+
+    limit = max(800, int(config.BUSINESS_CONTEXT_MAX_CHARS or 3500))
+    core_match = re.search(
+        r"(?ms)^##\s*CORE\b.*?(?=^##\s+(?!CORE\b)|\Z)",
+        corpus,
+    )
+    if core_match:
+        core = core_match.group(0).strip()
+        if len(core) > limit:
+            core = core[: limit - 1].rsplit(" ", 1)[0] + "…"
+        return (
+            f"{core}\n\n"
+            "(Large knowledge base loaded. For pricing details, features, FAQ, APIs, "
+            "or policies not in CORE, call lookup_knowledge with a short query.)"
+        )
+
+    if len(corpus) <= limit:
+        return corpus
+    trimmed = corpus[: limit - 1].rsplit(" ", 1)[0] + "…"
+    return (
+        f"{trimmed}\n\n"
+        "(More company facts available — call lookup_knowledge before inventing details.)"
+    )
+
 def _build_persona_block() -> str:
     """Friendly receptionist persona — tune via AGENT_NAME and VOICE_PERSONA in .env."""
     name = (config.AGENT_NAME or "").strip()
@@ -132,7 +164,8 @@ def build_system_prompt(*, force: bool = False) -> str:
         return _prompt_cached
 
     base = (config.SYSTEM_PROMPT_BASE or "").strip()
-    knowledge = load_business_knowledge()
+    knowledge_full = load_business_knowledge()
+    knowledge = knowledge_for_prompt(knowledge_full)
 
     language_block = (
         "LANGUAGE:\n"
@@ -218,9 +251,11 @@ def build_system_prompt(*, force: bool = False) -> str:
 
     rag_note = (
         "KNOWLEDGE TOOL:\n"
-        "- For specific pricing, packages, policies, or details not clearly above, "
-        "call lookup_knowledge with a short search query before answering.\n"
-        "- Speak only from tool results + facts above; never invent numbers."
+        f"- Full knowledge base is about {len(knowledge_full)} characters "
+        "(features, FAQ, APIs, use cases, objections).\n"
+        "- For anything beyond the short CORE facts above, "
+        "call lookup_knowledge with a short search query BEFORE answering.\n"
+        "- Speak only from tool results + CORE facts; never invent numbers or limits."
     )
     chunks.append(rag_note)
 
@@ -267,7 +302,7 @@ def _tokenize(query: str) -> list[str]:
     return [t for t in raw if len(t) > 1]
 
 
-def search_knowledge(query: str, max_chars: int | None = None) -> str:
+def search_knowledge(query: str, max_chars: int | None = None, extra: str = "") -> str:
     """
     Lightweight local RAG: score paragraphs in loaded knowledge by keyword overlap.
     Use for lookup_knowledge when n8n/backend search is not configured.
@@ -278,6 +313,9 @@ def search_knowledge(query: str, max_chars: int | None = None) -> str:
         return ""
 
     corpus = load_business_knowledge()
+    extra = (extra or "").strip()
+    if extra:
+        corpus = f"{extra}\n\n{corpus}" if corpus else extra
     if not corpus:
         return ""
 
@@ -305,8 +343,8 @@ def search_knowledge(query: str, max_chars: int | None = None) -> str:
 
     parts: list[str] = []
     total = 0
-    for _, para in scored[:6]:
-        chunk = para if len(para) <= 400 else para[:397] + "…"
+    for _, para in scored[:8]:
+        chunk = para if len(para) <= 600 else para[:597] + "…"
         if total + len(chunk) > limit:
             break
         parts.append(chunk)

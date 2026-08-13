@@ -197,7 +197,7 @@ async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any
         if config.KNOWLEDGE_SEARCH_LOCAL_FIRST and query:
             from knowledge import search_knowledge
 
-            local = search_knowledge(query)
+            local = search_knowledge(query, extra=str(ctx.get("knowledge_text") or ""))
             if local:
                 return json.dumps(
                     {
@@ -215,7 +215,23 @@ async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any
     else:
         action = name
         args = arguments
-    return await call_n8n(action, args, ctx)
+    result = await call_n8n(action, args, ctx)
+    if action not in ("lookup_knowledge", "end_call", "transfer_to_human"):
+        try:
+            from backend import post_action
+
+            await post_action(
+                action,
+                {
+                    "tenant_id": ctx.get("tenant_id"),
+                    "call_id": ctx.get("call_id"),
+                    "caller": ctx.get("from"),
+                    "args": args,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("backend post_action failed action=%s", action)
+    return result
 
 
 async def call_n8n(action: str, args: dict[str, Any], ctx: dict[str, Any]) -> str:
@@ -230,8 +246,9 @@ async def call_n8n(action: str, args: dict[str, Any], ctx: dict[str, Any]) -> st
         "from": ctx.get("from"),
         "direction": ctx.get("direction", "inbound"),
         "language": ctx.get("language"),
-        "notify_whatsapp": config.NOTIFY_WHATSAPP or None,
-        "business_name": config.BUSINESS_NAME,
+        "notify_whatsapp": ctx.get("notify_whatsapp") or config.NOTIFY_WHATSAPP or None,
+        "business_name": ctx.get("business_name") or config.BUSINESS_NAME,
+        "tenant_id": ctx.get("tenant_id") or None,
     }
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:

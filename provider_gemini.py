@@ -112,12 +112,25 @@ class GeminiLiveProvider(RealtimeProvider):
         self._call_direction = "inbound"
         self._followup_purpose = ""
         self._session_started = time.monotonic()
+        self._tenant_knowledge = ""
+        self._tenant_greeting = ""
+        self._tenant_outbound_greeting = ""
+        self._tenant_business = ""
+        self._tenant_agent = ""
 
     def set_call_direction(self, direction: str) -> None:
         self._call_direction = (direction or "inbound").strip().lower()
 
     def set_followup_purpose(self, purpose: str) -> None:
         self._followup_purpose = (purpose or "").strip()
+
+    def set_tenant_overlay(self, overlay: dict | None) -> None:
+        row = overlay or {}
+        self._tenant_knowledge = str(row.get("knowledge_text") or "").strip()
+        self._tenant_greeting = str(row.get("greeting") or "").strip()
+        self._tenant_outbound_greeting = str(row.get("outbound_greeting") or "").strip()
+        self._tenant_business = str(row.get("business_name") or "").strip()
+        self._tenant_agent = str(row.get("agent_name") or "").strip()
 
     def set_continuity_digest(self, digest: str) -> None:
         self._continuity_digest = (digest or "").strip()
@@ -183,7 +196,15 @@ class GeminiLiveProvider(RealtimeProvider):
             )
         else:
             system_prompt = (config.SYSTEM_PROMPT or "").strip() or knowledge.build_system_prompt()
-        config.SYSTEM_PROMPT = system_prompt
+        extra: list[str] = []
+        if self._tenant_business:
+            extra.append(f"THIS CALL: you represent {self._tenant_business}.")
+        if self._tenant_agent:
+            extra.append(f"Your name is {self._tenant_agent}.")
+        if self._tenant_knowledge:
+            extra.append(f"THIS BUSINESS KNOWLEDGE:\n{self._tenant_knowledge[:3500]}")
+        if extra:
+            system_prompt = f"{system_prompt}\n\n" + "\n".join(extra)
         resume_kwargs: dict[str, Any] = {}
         if self._resume_handle:
             resume_kwargs["handle"] = self._resume_handle
@@ -228,18 +249,20 @@ class GeminiLiveProvider(RealtimeProvider):
         if greet and not self._greeted:
             if self._call_direction == "outbound":
                 purpose = self._followup_purpose
+                outbound_g = self._tenant_outbound_greeting or config.OUTBOUND_GREETING
                 greet_text = (
                     "OUTBOUND follow-up — the person just answered. "
                     "Do NOT use inbound receptionist language. "
-                    f"Open with ONE short sentence like: {config.OUTBOUND_GREETING} "
+                    f"Open with ONE short sentence like: {outbound_g} "
                 )
                 if purpose:
                     greet_text += f"Mention this follow-up reason naturally: {purpose}. "
                 greet_text += "Then listen — do not end the call."
             else:
+                inbound_g = self._tenant_greeting or config.GREETING
                 greet_text = (
                     "Greet the caller now in ONE short sentence. "
-                    f"Use this greeting idea: {config.GREETING} "
+                    f"Use this greeting idea: {inbound_g} "
                     "Offer English or Hindi briefly if natural. "
                     "Then keep listening — do not end the call."
                 )

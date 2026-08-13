@@ -69,6 +69,7 @@ async def health() -> dict[str, str | bool]:
         "agent_first": config.AGENT_FIRST_ENABLED and bool(config.HUMAN_AGENT_NUMBER),
         "human_handover": config.HUMAN_HANDOVER_MODE,
         "human_transfer": bool(config.HUMAN_AGENT_NUMBER),
+        "backend": bool((config.BACKEND_URL or "").strip()),
     }
 
 
@@ -225,7 +226,9 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
     mode = (request.query_params.get("mode") or "").strip().lower()
     direction = (request.query_params.get("direction") or "inbound").strip().lower()
     ctx = (request.query_params.get("ctx") or "").strip()
+    tenant_id = (request.query_params.get("tenant_id") or "").strip()
     caller_from = ""
+    caller_to = ""
 
     try:
         call_uuid = await _plivo_form_value_async(
@@ -271,7 +274,13 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
 
     if mode == "ai" or direction == "outbound":
         return PlainTextResponse(
-            answer_xml(direction=direction, caller=caller_from, ctx=ctx),
+            answer_xml(
+                direction=direction,
+                caller=caller_from,
+                ctx=ctx,
+                called=caller_to,
+                tenant_id=tenant_id,
+            ),
             media_type="application/xml",
         )
 
@@ -283,7 +292,12 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
         return PlainTextResponse(agent_first_xml(), media_type="application/xml")
 
     return PlainTextResponse(
-        answer_xml(direction=direction, caller=caller_from),
+        answer_xml(
+            direction=direction,
+            caller=caller_from,
+            called=caller_to,
+            tenant_id=tenant_id,
+        ),
         media_type="application/xml",
     )
 
@@ -315,13 +329,18 @@ async def plivo_missed_call(_request: Request) -> PlainTextResponse:
 
 
 @app.api_route("/plivo/transfer", methods=["GET", "POST"])
-async def plivo_transfer(_request: Request) -> PlainTextResponse:
+async def plivo_transfer(request: Request) -> PlainTextResponse:
     """Live AI → human Dial (only when HUMAN_HANDOVER_MODE=transfer)."""
-    if not config.HUMAN_AGENT_NUMBER:
+    agent = (
+        await _plivo_form_value_async(request, "agent", "Agent")
+        or (request.query_params.get("agent") or "").strip()
+        or config.HUMAN_AGENT_NUMBER
+    )
+    if not agent:
         return PlainTextResponse(
             "HUMAN_AGENT_NUMBER is not configured", status_code=500
         )
-    return PlainTextResponse(transfer_xml(), media_type="application/xml")
+    return PlainTextResponse(transfer_xml(agent=agent), media_type="application/xml")
 
 
 @app.api_route("/plivo/stream-status", methods=["GET", "POST"])
@@ -454,6 +473,8 @@ async def plivo_stream(ws: WebSocket) -> None:
 
     direction = (ws.query_params.get("direction") or "inbound").strip().lower()
     caller = (ws.query_params.get("caller") or "").strip() or None
+    called = (ws.query_params.get("called") or "").strip() or None
+    tenant_id = (ws.query_params.get("tenant_id") or "").strip() or None
     purpose = None
     ctx = (ws.query_params.get("ctx") or "").strip()
     if ctx:
@@ -463,12 +484,22 @@ async def plivo_stream(ws: WebSocket) -> None:
             if not caller and row.get("to"):
                 caller = str(row["to"]).strip() or None
     log.info(
-        "Plivo stream connect direction=%s caller=%s ctx=%s",
+        "Plivo stream connect direction=%s caller=%s called=%s tenant_id=%s ctx=%s",
         direction,
         caller or "-",
+        called or "-",
+        tenant_id or "-",
         ctx or "-",
     )
-    await run_bridge(ws, telephony="plivo", direction=direction, caller=caller, purpose=purpose)
+    await run_bridge(
+        ws,
+        telephony="plivo",
+        direction=direction,
+        caller=caller,
+        purpose=purpose,
+        called=called,
+        tenant_id=tenant_id,
+    )
 
 
 # ---- Exotel Voicebot (primary while Plivo compliance is pending) --------

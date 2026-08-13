@@ -1,0 +1,11 @@
+.venv
+.env
+.env.*
+__pycache__
+*.pyc
+.git
+docs
+n8n
+scripts
+*.md
+!requirements.txt

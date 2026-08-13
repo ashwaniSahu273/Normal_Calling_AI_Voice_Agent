@@ -3,7 +3,7 @@
 **For:** Node/Express backend + Web + Flutter  
 **Answer:** Yes — implement as a ResilioHub feature. App never talks to Plivo or Gemini directly.
 
-Related docs: [FLOW.md](FLOW.md) (call path) · [PRODUCT_MULTI_TENANT.md](PRODUCT_MULTI_TENANT.md) (KYC / reseller) · [INTEGRATION.md](INTEGRATION.md) (DB + rollout)
+Related docs: [FLOW.md](FLOW.md) (call path) · [DEPLOY.md](DEPLOY.md) (nginx + Python next to Node) · [PRODUCT_MULTI_TENANT.md](PRODUCT_MULTI_TENANT.md) (KYC / reseller)
 
 **Official Plivo APIs Node must wrap:** [Subaccount](https://www.plivo.com/docs/account/api/subaccount) · [Application](https://www.plivo.com/docs/account/api/application) · [Phone Numbers search/buy](https://www.plivo.com/docs/numbers/api/phone-number) · [Account Numbers update](https://www.plivo.com/docs/numbers/api/account-phone-number) · [Compliance (India KYC)](https://www.plivo.com/docs/numbers/compliance)
 
@@ -629,6 +629,8 @@ No JWT. Never expose to Flutter.
 ### 4.1 Tenant config lookup (Voice → Node)
 
 Called at **start of every call** so AI loads that business’s knowledge.
+
+Python already calls this when `BACKEND_URL` + `BACKEND_SECRET` are set (`backend.py`).
 
 **`GET /api/internal/voice/tenant-config?number=+912264233283`**
 
@@ -1496,8 +1498,10 @@ PLIVO_AUTH_TOKEN=...
 | `VOICE_PUBLIC_HOST` | Building per-tenant `answer_url` in §5.2 |
 | `PLIVO_AUTH_ID` / `TOKEN` | All §5 Plivo REST calls |
 | `VOICE_BRIDGE_*` | Outbound dial via Python bridge |
+| `VOICE_WEBHOOK_SECRET` | Must match Python `BACKEND_SECRET` |
 
-Voice bridge `.env` already has `OUTBOUND_API_SECRET`. Use the **same value** as `VOICE_BRIDGE_SECRET`.
+Voice bridge: `OUTBOUND_API_SECRET` = Node `VOICE_BRIDGE_SECRET`.  
+Voice bridge: `BACKEND_SECRET` = Node `VOICE_WEBHOOK_SECRET`.
 
 ---
 

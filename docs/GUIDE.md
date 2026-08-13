@@ -4,7 +4,8 @@ Everything you need to **run**, **configure**, and **troubleshoot** the Python v
 
 **How URLs and files connect (diagrams):** **[FLOW.md](FLOW.md)** — read this if you only set `/plivo/answer` in Plivo and want to know how `/plivo/stream`, transfer, and outbound work.
 
-For **ResilioHub product integration** (Node backend, multi-tenant, clients) see **[INTEGRATION.md](INTEGRATION.md)**.
+For **deploy next to Node**: **[DEPLOY.md](DEPLOY.md)**.  
+For **Node + Web + Flutter APIs**: **[API_INTEGRATION.md](API_INTEGRATION.md)**.
 
 ---
 
@@ -206,6 +207,8 @@ curl -X POST http://127.0.0.1:5000/plivo/knowledge-profile \
 
 Or set `KNOWLEDGE_PROFILE` in `.env` and restart. Next call uses that knowledge.
 
+Large knowledge files (e.g. `data/resiliohub_knowledge.md`) put a short **`## CORE`** block in the live prompt; the rest is searched with **`lookup_knowledge`** so long calls stay fast.
+
 **`lookup_knowledge` tool:** searches local file first (`KNOWLEDGE_SEARCH_LOCAL_FIRST=true`), then n8n/backend if empty.
 
 For large FAQ: add Google Sheet tab or your API — see optional RAG section in n8n workflow.
@@ -303,16 +306,15 @@ Webhook ← voice-agent
 | Script | Purpose |
 |--------|---------|
 | `scripts/sync_n8n_workflow.py` | Copy `build_call_log.js` → workflow JSON |
-| `scripts/generate_flow_pdf.py` | Regenerate architecture PDF (`pip install reportlab`) |
 
-Neither script runs at call time — dev/ops only.
+Does not run at call time — ops only.
 
 ---
 
-## Roadmap (not in this repo yet)
+## Roadmap
 
 | Phase | Feature |
 |-------|---------|
-| Now | Single business, Plivo/Exotel, n8n, Sheets |
-| Next | Node backend call inbox — see [INTEGRATION.md](INTEGRATION.md) |
-| Later | Multi-tenant per client, outbound, human transfer |
+| Now | Single business, Plivo, n8n, Sheets |
+| Next | Node call inbox — [DEPLOY.md](DEPLOY.md) + [API_INTEGRATION.md](API_INTEGRATION.md) |
+| Later | Multi-tenant numbers / KYC — [PRODUCT_MULTI_TENANT.md](PRODUCT_MULTI_TENANT.md) |

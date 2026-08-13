@@ -451,7 +451,8 @@ Docs: [Calls API](https://www.plivo.com/docs/voice/api/calls)
 |------|-----|
 | Architecture + all URLs/files | **[FLOW.md](FLOW.md)** |
 | Full ops (env, voice, Sheets) | [GUIDE.md](GUIDE.md) |
-| ResilioHub Node backend + multi-tenant | [INTEGRATION.md](INTEGRATION.md) |
+| Deploy next to Node + nginx | [DEPLOY.md](DEPLOY.md) |
+| Node + Web + Flutter APIs | [API_INTEGRATION.md](API_INTEGRATION.md) |
 
 ---
 

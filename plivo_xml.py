@@ -18,7 +18,14 @@ def _xml_url(url: str) -> str:
     return html.escape(url, quote=False)
 
 
-def answer_xml(*, direction: str = "inbound", caller: str = "", ctx: str = "") -> str:
+def answer_xml(
+    *,
+    direction: str = "inbound",
+    caller: str = "",
+    ctx: str = "",
+    called: str = "",
+    tenant_id: str = "",
+) -> str:
     """Bidirectional mu-law stream → Gemini bridge."""
     direction = (direction or "inbound").strip().lower()
     qs = f"direction={quote(direction)}"
@@ -26,6 +33,10 @@ def answer_xml(*, direction: str = "inbound", caller: str = "", ctx: str = "") -
         qs += f"&caller={quote(caller)}"
     if ctx:
         qs += f"&ctx={quote(ctx)}"
+    if called:
+        qs += f"&called={quote(called)}"
+    if tenant_id:
+        qs += f"&tenant_id={quote(tenant_id)}"
     ws_url = _xml_url(f"wss://{config.PUBLIC_HOST}/plivo/stream?{qs}")
     status_cb = _xml_url(_host_url("/plivo/stream-status"))
     # extraHeaders survive even if WS query params get stripped by some proxies
@@ -34,6 +45,10 @@ def answer_xml(*, direction: str = "inbound", caller: str = "", ctx: str = "") -
         header_bits.append(f"caller={caller}")
     if ctx:
         header_bits.append(f"ctx={ctx}")
+    if called:
+        header_bits.append(f"called={called}")
+    if tenant_id:
+        header_bits.append(f"tenant_id={tenant_id}")
     extra = html.escape(";".join(header_bits), quote=True)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -88,9 +103,9 @@ def missed_call_hangup_xml() -> str:
     return '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Hangup/>\n</Response>\n'
 
 
-def transfer_xml() -> str:
+def transfer_xml(*, agent: str = "") -> str:
     """Mid-call handover — dial human agent."""
-    agent = (config.HUMAN_AGENT_NUMBER or "").strip()
+    agent = (agent or config.HUMAN_AGENT_NUMBER or "").strip()
     speak = html.escape(
         config.TRANSFER_ANNOUNCEMENT or "Please hold while I connect you to our team."
     )

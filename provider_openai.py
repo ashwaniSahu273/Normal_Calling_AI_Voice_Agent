@@ -23,6 +23,13 @@ _URL = f"wss://api.openai.com/v1/realtime?model={config.OPENAI_REALTIME_MODEL}"
 class OpenAIRealtimeProvider(RealtimeProvider):
     def __init__(self) -> None:
         self._ws: ClientConnection | None = None
+        self._tenant_knowledge = ""
+        self._tenant_business = ""
+
+    def set_tenant_overlay(self, overlay: dict | None) -> None:
+        row = overlay or {}
+        self._tenant_knowledge = str(row.get("knowledge_text") or "").strip()
+        self._tenant_business = str(row.get("business_name") or "").strip()
 
     async def connect(self) -> None:
         self._ws = await websockets.connect(
@@ -34,7 +41,13 @@ class OpenAIRealtimeProvider(RealtimeProvider):
             max_size=None,
         )
         system_prompt = knowledge.build_system_prompt()
-        config.SYSTEM_PROMPT = system_prompt
+        extra: list[str] = []
+        if self._tenant_business:
+            extra.append(f"THIS CALL: you represent {self._tenant_business}.")
+        if self._tenant_knowledge:
+            extra.append(f"THIS BUSINESS KNOWLEDGE:\n{self._tenant_knowledge[:3500]}")
+        if extra:
+            system_prompt = f"{system_prompt}\n\n" + "\n".join(extra)
         await self._ws.send(
             json.dumps(
                 {
