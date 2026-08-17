@@ -5,6 +5,8 @@
 
 **Short answer:** Yes, it is realistically implementable. Plivo already documents a **reseller / multi-tenant SaaS** model. The main constraint is **India regulation**: each client business needs its own KYC before they get an Indian number. That cannot be skipped or fully “instant.”
 
+**Buzzwords + 20-question ticket + Buddy replies (14 Aug 2026):** **[PLIVO_SUPPORT_QUESTIONS.md](PLIVO_SUPPORT_QUESTIONS.md)** §7.
+
 ---
 
 ## Table of contents
@@ -274,7 +276,9 @@ Ask them to confirm:
 
 Sales: [https://www.plivo.com/contact/sales/](https://www.plivo.com/contact/sales/)
 
-See [email draft](#12-email-draft-to-plivo-sales) below.
+**Full 20-question ticket + Buddy answers §7 + DLT/PE/160 glossary:** **[PLIVO_SUPPORT_QUESTIONS.md](PLIVO_SUPPORT_QUESTIONS.md)**
+
+See also [short sales email](#12-email-draft-to-plivo-sales) below.
 
 ---
 
@@ -371,6 +375,8 @@ Related project docs:
 ---
 
 ## 12. Email draft to Plivo sales
+
+Short sales ping. For the **20-question KYC + outbound + collections ticket**, use **[PLIVO_SUPPORT_QUESTIONS.md](PLIVO_SUPPORT_QUESTIONS.md)**.
 
 Use this when you are ready:
 

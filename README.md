@@ -16,6 +16,7 @@ Caller → Plivo → Python (:5000) → Gemini
 | **[docs/API_INTEGRATION.md](docs/API_INTEGRATION.md)** | Node + Web + Flutter API contract |
 | **[docs/FLOW.md](docs/FLOW.md)** | How `/plivo/answer` connects to stream/tools |
 | **[docs/PLIVO_SETUP.md](docs/PLIVO_SETUP.md)** | Plivo console after KYC |
+| **[docs/PLIVO_SUPPORT_QUESTIONS.md](docs/PLIVO_SUPPORT_QUESTIONS.md)** | DLT/PE/160 buzzwords + Plivo support ticket |
 | **[docs/GUIDE.md](docs/GUIDE.md)** | `.env`, voice, n8n, troubleshooting |
 | **[docs/PRODUCT_MULTI_TENANT.md](docs/PRODUCT_MULTI_TENANT.md)** | Later: reseller / KYC / numbers |
 

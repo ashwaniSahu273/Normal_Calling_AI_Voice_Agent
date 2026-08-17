@@ -5,6 +5,7 @@ Step-by-step guide to connect **Plivo** to this voice-agent repo after **KYC is 
 **You need:** Plivo account (KYC done), Gemini API key, n8n webhook (optional), a public HTTPS URL.
 
 **How the system works (diagrams, all URLs, every file):** **[FLOW.md](FLOW.md)**  
+**160/DLT/PE terms + copy-paste Plivo ticket:** **[PLIVO_SUPPORT_QUESTIONS.md](PLIVO_SUPPORT_QUESTIONS.md)**  
 **Official Plivo docs:** [Voice quickstart](https://www.plivo.com/docs/voice/quickstart/quickstart) · [Numbers](https://www.plivo.com/docs/numbers) · [India numbers](https://www.plivo.com/docs/numbers/rent-india-numbers)
 
 ---
