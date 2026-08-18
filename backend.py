@@ -72,6 +72,9 @@ async def post_call_ended(payload: dict[str, Any]) -> None:
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(url, json=payload, headers=_headers())
+            if resp.status_code == 404:
+                log.warning("Node call-ended 404 body=%s", resp.text[:400])
+                return
             resp.raise_for_status()
         log.info("Node call-ended ok call_id=%s", payload.get("call_id"))
     except Exception:  # noqa: BLE001
@@ -86,6 +89,9 @@ async def post_action(action: str, payload: dict[str, Any]) -> None:
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(url, json=body, headers=_headers())
+            if resp.status_code == 404:
+                log.warning("Node action=%s 404 body=%s", action, resp.text[:400])
+                return
             resp.raise_for_status()
     except Exception:  # noqa: BLE001
         log.exception("Node action=%s failed", action)

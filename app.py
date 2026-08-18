@@ -5,7 +5,6 @@ import logging
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse, PlainTextResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 from bridge import run_bridge
@@ -26,19 +25,27 @@ app = FastAPI(title="AI Voice Receptionist Bridge")
 log = logging.getLogger("voice-agent.app")
 
 
-class _StripPathWhitespaceMiddleware(BaseHTTPMiddleware):
-    """Plivo Answer URL pasted with trailing space → /plivo/answer%20 → 404 busy tone."""
+class _StripPathWhitespaceMiddleware:
+    """Plivo Answer URL pasted with trailing space → /plivo/answer%20 → 404 busy tone.
 
-    async def dispatch(self, request: Request, call_next):
-        path = request.scope.get("path", "")
-        stripped = path.rstrip()
-        if stripped != path:
-            log.warning("Trimmed trailing whitespace from URL path %r", path)
-            request.scope["path"] = stripped
-        return await call_next(request)
+    Pure ASGI — BaseHTTPMiddleware eats POST bodies (From/To never arrive).
+    """
 
+    def __init__(self, app):
+        self.app = app
 
-app.add_middleware(_StripPathWhitespaceMiddleware)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path") or ""
+            stripped = path.rstrip()
+            if stripped != path:
+                log.warning("Trimmed trailing whitespace from URL path %r", path)
+                scope = dict(scope)
+                scope["path"] = stripped
+                raw = scope.get("raw_path")
+                if isinstance(raw, (bytes, bytearray)):
+                    scope["raw_path"] = bytes(raw).rstrip()
+        await self.app(scope, receive, send)
 
 
 @app.on_event("startup")
@@ -176,20 +183,31 @@ async def set_knowledge_profile(request: Request) -> JSONResponse:
         }
     )
 
-async def _plivo_form_value_async(request: Request, *keys: str) -> str:
-    for key in keys:
-        val = request.query_params.get(key)
-        if val:
-            return str(val).strip()
+async def _plivo_params(request: Request) -> dict[str, str]:
+    """Parse Plivo query + urlencoded/JSON body once. Stdlib only — no python-multipart."""
+    cached = getattr(request.state, "plivo_params", None)
+    if isinstance(cached, dict):
+        return cached
     try:
-        form = await request.form()
-        for key in keys:
-            val = form.get(key)
-            if val is not None and str(val).strip():
-                return str(val).strip()
+        raw = await request.body()
     except Exception:  # noqa: BLE001
-        pass
-    return ""
+        raw = b""
+    from plivo_form import parse_plivo_payload
+
+    params = parse_plivo_payload(
+        query=list(request.query_params.multi_items()),
+        body=raw,
+        content_type=request.headers.get("content-type") or "",
+    )
+    request.state.plivo_params = params
+    return params
+
+
+async def _plivo_form_value_async(request: Request, *keys: str) -> str:
+    from plivo_form import pick_plivo_value
+
+    params = await _plivo_params(request)
+    return pick_plivo_value(params, *keys)
 
 
 async def _plivo_caller_from_request(request: Request, *, direction: str) -> str:
@@ -246,6 +264,8 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
                 caller_from = str(row["to"]).strip()
             if not tenant_id and row and row.get("tenant_id"):
                 tenant_id = str(row["tenant_id"]).strip()
+        if not caller_to and direction != "outbound":
+            caller_to = (config.PLIVO_FROM_NUMBER or "").strip()
         if call_uuid and (caller_from or raw_from or caller_to):
             from call_meta import remember
 
@@ -255,17 +275,16 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
                 to=caller_to,
                 direction=direction,
             )
-        if call_uuid or caller_from:
-            log.info(
-                "Plivo answer call_uuid=%s from=%s to=%s mode=%s direction=%s ctx=%s",
-                call_uuid,
-                caller_from or "-",
-                caller_to or "-",
-                mode or "-",
-                direction,
-                ctx or "-",
-            )
-        elif not caller_from:
+        log.info(
+            "Plivo answer call_uuid=%s from=%s to=%s mode=%s direction=%s ctx=%s",
+            call_uuid or "-",
+            caller_from or "-",
+            caller_to or "-",
+            mode or "-",
+            direction,
+            ctx or "-",
+        )
+        if not caller_from:
             log.warning(
                 "Plivo answer missing caller number direction=%s mode=%s",
                 direction,
@@ -490,6 +509,8 @@ async def plivo_stream(ws: WebSocket) -> None:
                 caller = str(row["to"]).strip() or None
             if not tenant_id and row.get("tenant_id"):
                 tenant_id = str(row["tenant_id"]).strip() or None
+    if not called and direction != "outbound":
+        called = (config.PLIVO_FROM_NUMBER or "").strip() or None
     log.info(
         "Plivo stream connect direction=%s caller=%s called=%s tenant_id=%s ctx=%s",
         direction,
@@ -530,6 +551,9 @@ async def exotel_ws_url(request: Request) -> JSONResponse:
 @app.websocket("/exotel/stream")
 async def exotel_stream(ws: WebSocket) -> None:
     await run_bridge(ws, telephony="exotel")
+
+
+app = _StripPathWhitespaceMiddleware(app)
 
 
 if __name__ == "__main__":

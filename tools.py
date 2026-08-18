@@ -226,6 +226,8 @@ async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any
                     "tenant_id": ctx.get("tenant_id"),
                     "call_id": ctx.get("call_id"),
                     "caller": ctx.get("from"),
+                    "called": ctx.get("called"),
+                    "phone_number": ctx.get("called"),
                     "args": args,
                     "details": args,
                 },

@@ -151,3 +151,15 @@ def pick_remote_number(call: dict[str, Any] | None, *, direction: str) -> str:
     if direction == "outbound":
         return to or frm
     return frm or to
+
+
+def pick_local_number(call: dict[str, Any] | None, *, direction: str) -> str:
+    """Our DID from Plivo Call resource (inbound To / outbound From)."""
+    if not call:
+        return ""
+    direction = (direction or "inbound").strip().lower()
+    frm = str(call.get("from_number") or call.get("from") or "").strip()
+    to = str(call.get("to_number") or call.get("to") or "").strip()
+    if direction == "outbound":
+        return frm or to
+    return to or frm
