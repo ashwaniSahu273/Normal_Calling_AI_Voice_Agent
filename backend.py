@@ -38,7 +38,7 @@ async def get_tenant_config(
         params["number"] = number
     if not params:
         return None
-    url = f"{_base()}/api/internal/voice/tenant-config"
+        url = f"{_base()}/api/internal/ai-calling/tenant-config"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(url, params=params, headers=_headers())
@@ -68,7 +68,7 @@ async def get_tenant_config(
 async def post_call_ended(payload: dict[str, Any]) -> None:
     if not configured():
         return
-    url = f"{_base()}/api/internal/voice/call-ended"
+    url = f"{_base()}/api/internal/ai-calling/call-ended"
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(url, json=payload, headers=_headers())
@@ -81,7 +81,7 @@ async def post_call_ended(payload: dict[str, Any]) -> None:
 async def post_action(action: str, payload: dict[str, Any]) -> None:
     if not configured() or not action:
         return
-    url = f"{_base()}/api/internal/voice/action"
+    url = f"{_base()}/api/internal/ai-calling/action"
     body = {"action": action, **payload}
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:

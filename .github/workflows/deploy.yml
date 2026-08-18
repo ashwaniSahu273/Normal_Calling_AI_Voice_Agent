@@ -1,0 +1,140 @@
+name: Deploy Voice Agent
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+# One deploy at a time — queue new pushes, do not cancel an in-flight release.
+concurrency:
+  group: deploy-voice-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy.pem
+          chmod 600 ~/.ssh/deploy.pem
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName ${{ secrets.SSH_HOST }}
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/deploy.pem
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      # --delete removes dest files missing from source, but never excluded paths
+      # unless --delete-excluded is set (we do not set it). .env / .venv stay.
+      - name: Sync code to server
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude '.venv/' \
+            --exclude 'venv/' \
+            --exclude '__pycache__/' \
+            --exclude '*.pyc' \
+            --exclude '.cursor/' \
+            --exclude '.agents/' \
+            --exclude '.claude/' \
+            --exclude '*.pem' \
+            ./ deploy-target:/home/ubuntu/voice-agent/
+
+      - name: Install deps, update env, restart pm2
+        run: |
+          ssh deploy-target 'set -euo pipefail
+            cd /home/ubuntu/voice-agent
+            test -f app.py || { echo "app.py missing after sync"; exit 1; }
+            test -f requirements.txt || { echo "requirements.txt missing"; exit 1; }
+
+            command -v python3 >/dev/null 2>&1 || { echo "python3 missing on server"; exit 1; }
+            if [ ! -x .venv/bin/python ]; then
+              python3 -m venv .venv
+            fi
+            .venv/bin/pip install --upgrade pip
+            .venv/bin/pip install -r requirements.txt
+
+            test -f .env || touch .env
+
+            set_kv () {
+              key="$1"
+              val="$2"
+              if [ -z "$val" ]; then
+                return 0
+              fi
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|g" .env
+              else
+                echo "${key}=${val}" >> .env
+              fi
+            }
+
+            set_kv AI_PROVIDER "gemini"
+            set_kv TELEPHONY_PROVIDER "plivo"
+            set_kv PORT "5000"
+            set_kv PUBLIC_HOST "${{ secrets.VOICE_PUBLIC_HOST }}"
+            set_kv BACKEND_URL "${{ secrets.VOICE_BACKEND_URL }}"
+            set_kv BACKEND_SECRET "${{ secrets.VOICE_WEBHOOK_SECRET }}"
+            set_kv OUTBOUND_API_SECRET "${{ secrets.VOICE_BRIDGE_SECRET }}"
+            set_kv GEMINI_API_KEY "${{ secrets.GEMINI_API_KEY }}"
+            set_kv PLIVO_AUTH_ID "${{ secrets.PLIVO_AUTH_ID }}"
+            set_kv PLIVO_AUTH_TOKEN "${{ secrets.PLIVO_AUTH_TOKEN }}"
+            set_kv PLIVO_FROM_NUMBER "${{ secrets.PLIVO_FROM_NUMBER }}"
+
+            SCRIPT=$(pm2 jlist | python3 -c "
+          import json,sys
+          try:
+            data=json.load(sys.stdin)
+          except Exception:
+            data=[]
+          p=next((x for x in data if x.get(\"name\")==\"voice-agent\"), None)
+          print((p or {}).get(\"pm2_env\",{}).get(\"pm_exec_path\",\"\") if p else \"\")
+          " || true)
+
+            NEED_RECREATE=0
+            if [ -z "${SCRIPT:-}" ]; then
+              NEED_RECREATE=1
+            elif ! echo "$SCRIPT" | grep -q "python"; then
+              NEED_RECREATE=1
+            fi
+
+            if [ "$NEED_RECREATE" = "1" ]; then
+              pm2 delete voice-agent 2>/dev/null || true
+              pm2 start .venv/bin/python \
+                --name voice-agent \
+                --cwd /home/ubuntu/voice-agent \
+                -- app.py
+            else
+              pm2 restart voice-agent --update-env
+            fi
+
+            pm2 save
+            sleep 4
+
+            STATUS=$(pm2 jlist | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)
+          p=next((x for x in data if x.get(\"name\")==\"voice-agent\"), None)
+          if not p:
+            raise SystemExit(2)
+          print(p[\"pm2_env\"][\"status\"])
+          ")
+            [ "$STATUS" = "online" ]
+            echo "voice-agent $STATUS"
+            curl -fsS http://127.0.0.1:5000/health || true
+          '

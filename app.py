@@ -244,6 +244,8 @@ async def plivo_answer(request: Request) -> PlainTextResponse:
             row = get_outbound_ctx(ctx)
             if row and row.get("to"):
                 caller_from = str(row["to"]).strip()
+            if not tenant_id and row and row.get("tenant_id"):
+                tenant_id = str(row["tenant_id"]).strip()
         if call_uuid and (caller_from or raw_from or caller_to):
             from call_meta import remember
 
@@ -420,6 +422,7 @@ async def _outbound_body(request: Request) -> dict:
             data = {
                 "to": q.get("to") or data.get("to", ""),
                 "purpose": q.get("purpose") or data.get("purpose", ""),
+                "tenant_id": q.get("tenant_id") or data.get("tenant_id", ""),
             }
     return data
 
@@ -433,6 +436,7 @@ async def plivo_outbound(request: Request) -> JSONResponse:
     body = await _outbound_body(request)
     to = str(body.get("to") or "").strip()
     purpose = str(body.get("purpose") or "").strip()
+    tenant_id = str(body.get("tenant_id") or "").strip()
     if not to:
         return JSONResponse(
             {
@@ -450,13 +454,14 @@ async def plivo_outbound(request: Request) -> JSONResponse:
                 {"error": "PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN not configured"},
                 status_code=503,
             )
-        data = await create_outbound_call(to, purpose=purpose)
+        data = await create_outbound_call(to, purpose=purpose, tenant_id=tenant_id)
         return JSONResponse(
             {
                 "ok": True,
                 "to": to,
                 "direction": "outbound",
                 "purpose": purpose or None,
+                "tenant_id": tenant_id or None,
                 "request_uuid": data.get("request_uuid"),
                 "message_uuid": data.get("message_uuid"),
             }
@@ -483,6 +488,8 @@ async def plivo_stream(ws: WebSocket) -> None:
             purpose = row.get("purpose") or None
             if not caller and row.get("to"):
                 caller = str(row["to"]).strip() or None
+            if not tenant_id and row.get("tenant_id"):
+                tenant_id = str(row["tenant_id"]).strip() or None
     log.info(
         "Plivo stream connect direction=%s caller=%s called=%s tenant_id=%s ctx=%s",
         direction,

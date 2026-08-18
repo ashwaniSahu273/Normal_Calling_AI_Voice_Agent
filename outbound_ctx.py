@@ -16,13 +16,14 @@ def _purge() -> None:
         _store.pop(key, None)
 
 
-def store(*, purpose: str = "", to: str = "") -> str:
+def store(*, purpose: str = "", to: str = "", tenant_id: str = "") -> str:
     """Save outbound metadata; return short ctx id for answer/stream URLs."""
     _purge()
     ctx_id = secrets.token_urlsafe(8)
     _store[ctx_id] = {
         "purpose": (purpose or "").strip(),
         "to": (to or "").strip(),
+        "tenant_id": (tenant_id or "").strip(),
         "created": time.time(),
     }
     return ctx_id

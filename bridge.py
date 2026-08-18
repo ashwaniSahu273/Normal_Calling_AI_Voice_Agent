@@ -910,6 +910,7 @@ class CallBridge:
             "summary": summary,
             "next_step": next_step,
             "outcome": outcome,
+            "transcript": conversation_full,
             "conversation_full": conversation_full,
             "transcript_turns": transcript_turns,
             "notify_whatsapp": self._notify_whatsapp or None,

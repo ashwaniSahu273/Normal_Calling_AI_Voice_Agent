@@ -37,6 +37,7 @@ async def create_outbound_call(
     to: str,
     *,
     purpose: str = "",
+    tenant_id: str = "",
     answer_url: str | None = None,
     extra_params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -48,9 +49,11 @@ async def create_outbound_call(
         raise RuntimeError("PLIVO_FROM_NUMBER is not configured")
 
     # Always store ctx so bridge gets callee number even if Answer form parse fails.
-    ctx_id = store(purpose=purpose, to=to.strip())
+    ctx_id = store(purpose=purpose, to=to.strip(), tenant_id=tenant_id)
     url = answer_url or _public_url("/plivo/answer?direction=outbound")
     url = f"{url}&ctx={quote(ctx_id)}"
+    if tenant_id:
+        url = f"{url}&tenant_id={quote(tenant_id)}"
     payload: dict[str, str] = {
         "from": from_number,
         "to": to.strip(),

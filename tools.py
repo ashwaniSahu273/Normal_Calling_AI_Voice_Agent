@@ -227,6 +227,7 @@ async def dispatch_tool(name: str, arguments: dict[str, Any], ctx: dict[str, Any
                     "call_id": ctx.get("call_id"),
                     "caller": ctx.get("from"),
                     "args": args,
+                    "details": args,
                 },
             )
         except Exception:  # noqa: BLE001
