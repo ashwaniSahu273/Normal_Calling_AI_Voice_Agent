@@ -38,7 +38,7 @@ async def get_tenant_config(
         params["number"] = number
     if not params:
         return None
-        url = f"{_base()}/api/internal/ai-calling/tenant-config"
+    url = f"{_base()}/api/internal/ai-calling/tenant-config"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(url, params=params, headers=_headers())
