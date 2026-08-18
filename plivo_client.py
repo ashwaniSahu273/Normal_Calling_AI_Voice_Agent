@@ -38,17 +38,23 @@ async def create_outbound_call(
     *,
     purpose: str = "",
     tenant_id: str = "",
+    from_number: str = "",
+    auth_id: str = "",
+    auth_token: str = "",
     answer_url: str | None = None,
     extra_params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Dial `to` from PLIVO_FROM_NUMBER; answer URL connects callee to AI stream."""
+    """Dial `to` from tenant DID (or PLIVO_FROM_NUMBER) using subaccount creds when set."""
     from outbound_ctx import store
 
-    from_number = (config.PLIVO_FROM_NUMBER or "").strip()
+    auth_id = (auth_id or config.PLIVO_AUTH_ID or "").strip()
+    auth_token = (auth_token or config.PLIVO_AUTH_TOKEN or "").strip()
+    from_number = (from_number or config.PLIVO_FROM_NUMBER or "").strip()
+    if not auth_id or not auth_token:
+        raise RuntimeError("PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN are required")
     if not from_number:
-        raise RuntimeError("PLIVO_FROM_NUMBER is not configured")
+        raise RuntimeError("No from-number: set tenant phone or PLIVO_FROM_NUMBER")
 
-    # Always store ctx so bridge gets callee number even if Answer form parse fails.
     ctx_id = store(purpose=purpose, to=to.strip(), tenant_id=tenant_id)
     url = answer_url or _public_url("/plivo/answer?direction=outbound")
     url = f"{url}&ctx={quote(ctx_id)}"
@@ -63,12 +69,18 @@ async def create_outbound_call(
     if extra_params:
         payload.update(extra_params)
 
-    api = f"{_BASE}/Account/{config.PLIVO_AUTH_ID}/Call/"
+    api = f"{_BASE}/Account/{auth_id}/Call/"
     async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(api, data=payload, auth=_auth())
+        resp = await client.post(api, data=payload, auth=(auth_id, auth_token))
         resp.raise_for_status()
         data = resp.json()
-    log.info("Plivo outbound to=%s request_uuid=%s", to, data.get("request_uuid"))
+    log.info(
+        "Plivo outbound to=%s from=%s account=%s request_uuid=%s",
+        to,
+        from_number,
+        auth_id,
+        data.get("request_uuid"),
+    )
     return data
 
 

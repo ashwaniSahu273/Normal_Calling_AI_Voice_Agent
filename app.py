@@ -466,14 +466,21 @@ async def plivo_outbound(request: Request) -> JSONResponse:
         )
 
     try:
-        from plivo_client import configured, create_outbound_call
+        from backend import get_tenant_config
+        from plivo_client import create_outbound_call
 
-        if not configured():
-            return JSONResponse(
-                {"error": "PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN not configured"},
-                status_code=503,
-            )
-        data = await create_outbound_call(to, purpose=purpose, tenant_id=tenant_id)
+        row = await get_tenant_config(tenant_id=tenant_id) if tenant_id else None
+        from_number = str((row or {}).get("phone_number") or "").strip()
+        auth_id = str((row or {}).get("plivo_auth_id") or "").strip()
+        auth_token = str((row or {}).get("plivo_auth_token") or "").strip()
+        data = await create_outbound_call(
+            to,
+            purpose=purpose,
+            tenant_id=tenant_id,
+            from_number=from_number,
+            auth_id=auth_id,
+            auth_token=auth_token,
+        )
         return JSONResponse(
             {
                 "ok": True,
